@@ -9,6 +9,7 @@ import numpy as np
 
 from codec.preprocessing import FramePreprocessor
 from codec.types import PreprocessingArtifacts
+from data.campaigns import CampaignDatasetBundle, load_campaign_dataset_bundle
 from objectives.distortion import estimate_reference_noise_floor
 from utils import FloatArray
 
@@ -128,6 +129,56 @@ class PreparedPsdDataset:
             noise_floors=noise_floors,
             noise_floor_window=noise_floor_window,
             noise_floor_percentile=noise_floor_percentile,
+        )
+
+    @classmethod
+    def from_campaigns(
+        cls,
+        campaign_root: str | Path,  # Root directory containing raw campaign subdirectories
+        *,
+        preprocessor: FramePreprocessor,
+        include_campaign_globs: list[str] | tuple[str, ...] | None = None,
+        exclude_campaign_globs: list[str] | tuple[str, ...] | None = None,
+        include_node_globs: list[str] | tuple[str, ...] | None = None,
+        target_bin_count: int | None = None,
+        value_scale: str = "db_to_power",
+        max_frames: int | None = None,
+        noise_floor_window: int | None = None,
+        noise_floor_percentile: float = 10.0,
+    ) -> PreparedPsdDataset:
+        """Create a prepared dataset directly from raw campaign CSV acquisitions.
+
+        The raw campaigns contain PSD vectors encoded inside CSV rows and may mix
+        different RBW-dependent PSD lengths. This constructor delegates that boundary
+        handling to `data.campaigns`, then applies the repository preprocessing once.
+        """
+        bundle = load_campaign_dataset_bundle(
+            campaign_root,
+            include_campaign_globs=include_campaign_globs,
+            exclude_campaign_globs=exclude_campaign_globs,
+            include_node_globs=include_node_globs,
+            target_bin_count=target_bin_count,
+            value_scale=value_scale,
+            max_frames=max_frames,
+            noise_floor_window=noise_floor_window,
+            noise_floor_percentile=noise_floor_percentile,
+        )
+        return cls.from_campaign_bundle(bundle, preprocessor=preprocessor)
+
+    @classmethod
+    def from_campaign_bundle(
+        cls,
+        bundle: CampaignDatasetBundle,
+        *,
+        preprocessor: FramePreprocessor,
+    ) -> PreparedPsdDataset:
+        """Create a prepared dataset from a harmonized raw-campaign bundle."""
+        return cls.from_frames(
+            bundle.frames,
+            preprocessor=preprocessor,
+            frequency_grid_hz=bundle.frequency_grid_hz,
+            noise_floors=bundle.noise_floors,
+            noise_floor_window=None,
         )
 
     def __len__(self) -> int:

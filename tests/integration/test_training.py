@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import json
 from pathlib import Path
 
 import numpy as np
@@ -26,6 +28,107 @@ from pipelines.training import (
 )
 
 torch = pytest.importorskip("torch")
+
+
+def _write_tiny_campaign_dataset(campaign_root: Path) -> None:
+    """Write a small raw-campaign fixture compatible with the trainer."""
+    campaign_dir = campaign_root / "RBW10"
+    campaign_dir.mkdir(parents=True, exist_ok=True)
+
+    with (campaign_dir / "metadata.csv").open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.DictWriter(
+            stream,
+            fieldnames=[
+                "campaign_label",
+                "campaign_id",
+                "start_date",
+                "stop_date",
+                "start_time",
+                "stop_time",
+                "acquisition_freq_minutes",
+                "central_freq_MHz",
+                "span_MHz",
+                "sample_rate_hz",
+                "lna_gain_dB",
+                "vga_gain_dB",
+                "rbw_kHz",
+                "antenna_amp",
+            ],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "campaign_label": "RBW10",
+                "campaign_id": 99,
+                "start_date": "2026-03-18T00:00:00.000Z",
+                "stop_date": "2026-03-18T00:00:00.000Z",
+                "start_time": "00:00:00",
+                "stop_time": "01:00:00",
+                "acquisition_freq_minutes": 2,
+                "central_freq_MHz": 98,
+                "span_MHz": 20,
+                "sample_rate_hz": 20_000_000,
+                "lna_gain_dB": 16,
+                "vga_gain_dB": 16,
+                "rbw_kHz": 10,
+                "antenna_amp": "false",
+            }
+        )
+
+    with (campaign_dir / "Node1.csv").open("w", encoding="utf-8", newline="") as stream:
+        writer = csv.DictWriter(
+            stream,
+            fieldnames=[
+                "id",
+                "mac",
+                "campaign_id",
+                "pxx",
+                "start_freq_hz",
+                "end_freq_hz",
+                "timestamp",
+                "lat",
+                "lng",
+                "excursion_peak_to_peak_hz",
+                "excursion_peak_deviation_hz",
+                "excursion_rms_deviation_hz",
+                "depth_peak_to_peak",
+                "depth_peak_deviation",
+                "depth_rms_deviation",
+                "created_at",
+            ],
+        )
+        writer.writeheader()
+        for row_index, frame_values_db in enumerate(
+            [
+                [-30.0, -25.0, -20.0, -10.0, -20.0, -25.0, -30.0, -35.0],
+                [-29.0, -24.0, -19.0, -9.0, -19.0, -24.0, -29.0, -34.0],
+                [-31.0, -26.0, -21.0, -11.0, -21.0, -26.0, -31.0, -36.0],
+                [-28.0, -23.0, -18.0, -8.0, -18.0, -23.0, -28.0, -33.0],
+                [-32.0, -27.0, -22.0, -12.0, -22.0, -27.0, -32.0, -37.0],
+                [-30.5, -25.5, -20.5, -10.5, -20.5, -25.5, -30.5, -35.5],
+            ],
+            start=1,
+        ):
+            writer.writerow(
+                {
+                    "id": row_index,
+                    "mac": "00:00:00:00:00:00",
+                    "campaign_id": 99,
+                    "pxx": json.dumps(frame_values_db),
+                    "start_freq_hz": 88_000_000,
+                    "end_freq_hz": 108_000_000,
+                    "timestamp": row_index * 1_000,
+                    "lat": "",
+                    "lng": "",
+                    "excursion_peak_to_peak_hz": "",
+                    "excursion_peak_deviation_hz": "",
+                    "excursion_rms_deviation_hz": "",
+                    "depth_peak_to_peak": "",
+                    "depth_peak_deviation": "",
+                    "depth_rms_deviation": "",
+                    "created_at": "2026-03-18T00:00:00.000Z",
+                }
+            )
 
 
 def _write_tiny_dataset(dataset_path: Path) -> None:
@@ -131,3 +234,32 @@ def test_training_export_writes_encoder_onnx(tmp_path: Path) -> None:
     model = onnx.load(str(summary.onnx_path))
     assert model.graph.input[0].name == "normalized_frame"
     assert model.graph.output[0].name == "pre_quantization_latents"
+
+
+def test_training_can_load_raw_campaign_directories(tmp_path: Path) -> None:
+    """The trainer should ingest raw campaign directories as a first-class dataset source."""
+    campaign_root = tmp_path / "campaigns"
+    _write_tiny_campaign_dataset(campaign_root)
+    experiment_config = _make_experiment_config(tmp_path, export_onnx=False)
+    experiment_config = TrainingExperimentConfig(
+        dataset=DatasetConfig(
+            dataset_path=campaign_root,
+            source_format="campaigns",
+            noise_floor_window=2,
+            validation_fraction=1.0 / 3.0,
+            shuffle=True,
+            seed=3,
+            campaign_target_bin_count=8,
+        ),
+        runtime=experiment_config.runtime,
+        model=experiment_config.model,
+        training=experiment_config.training,
+        artifacts=experiment_config.artifacts,
+        task=experiment_config.task,
+    )
+    trainer = TorchCodecTrainer(experiment_config)
+    training_dataset, validation_dataset = trainer.load_prepared_datasets()
+    summary = trainer.fit(training_dataset, validation_dataset)
+
+    assert summary.best_checkpoint_path is not None
+    assert summary.best_checkpoint_path.exists()

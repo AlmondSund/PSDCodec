@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import shutil
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -62,7 +62,8 @@ def _require_torch() -> Any:
 class DatasetConfig:
     """Dataset loading configuration for one training experiment."""
 
-    dataset_path: Path  # Input `.npz` dataset archive
+    dataset_path: Path  # Input `.npz` archive or raw campaign root directory
+    source_format: str = "npz"  # Dataset source type: `npz` or `campaigns`
     frames_key: str = "frames"  # NPZ key containing the PSD frame matrix
     frequency_grid_key: str | None = "frequency_grid_hz"  # Optional NPZ key for the frequency grid
     noise_floor_key: str | None = None  # Optional NPZ key for explicit noise floors
@@ -73,9 +74,17 @@ class DatasetConfig:
         True  # Whether to shuffle before splitting and when building the training loader
     )
     seed: int = 0  # Random seed for deterministic train/validation splits
+    campaign_include_globs: list[str] = field(default_factory=lambda: ["*"])
+    campaign_exclude_globs: list[str] = field(default_factory=list)
+    campaign_node_globs: list[str] = field(default_factory=lambda: ["Node*.csv"])
+    campaign_target_bin_count: int | None = None  # Optional common PSD length after harmonization
+    campaign_value_scale: str = "db_to_power"  # Raw-value transform applied at campaign ingestion
+    campaign_max_frames: int | None = None  # Optional deterministic truncation after raw loading
 
     def __post_init__(self) -> None:
         """Validate dataset-loading configuration."""
+        if self.source_format not in {"npz", "campaigns"}:
+            raise CodecConfigurationError("source_format must be either 'npz' or 'campaigns'.")
         if not (0.0 < self.validation_fraction < 1.0):
             raise CodecConfigurationError(
                 "validation_fraction must lie in the open interval (0, 1)."
@@ -84,6 +93,16 @@ class DatasetConfig:
             raise CodecConfigurationError("noise_floor_window must be strictly positive.")
         if not (0.0 <= self.noise_floor_percentile <= 100.0):
             raise CodecConfigurationError("noise_floor_percentile must lie in [0, 100].")
+        if self.campaign_target_bin_count is not None and self.campaign_target_bin_count <= 0:
+            raise CodecConfigurationError(
+                "campaign_target_bin_count must be strictly positive when set."
+            )
+        if self.campaign_max_frames is not None and self.campaign_max_frames <= 0:
+            raise CodecConfigurationError("campaign_max_frames must be strictly positive when set.")
+        if self.campaign_value_scale not in {"db_to_power", "identity"}:
+            raise CodecConfigurationError(
+                "campaign_value_scale must be either 'db_to_power' or 'identity'."
+            )
 
 
 @dataclass(frozen=True)
@@ -263,23 +282,38 @@ class TorchCodecTrainer:
 
     def load_prepared_datasets(self) -> tuple[PreparedPsdDataset, PreparedPsdDataset]:
         """Load the configured dataset, preprocess it, and split it into train/validation sets."""
-        dataset = PreparedPsdDataset.from_npz(
-            self.experiment_config.dataset.dataset_path,
-            preprocessor=self.preprocessor,
-            frames_key=self.experiment_config.dataset.frames_key,
-            frequency_grid_key=self.experiment_config.dataset.frequency_grid_key,
-            noise_floor_key=self.experiment_config.dataset.noise_floor_key,
-            noise_floor_window=self.experiment_config.dataset.noise_floor_window,
-            noise_floor_percentile=self.experiment_config.dataset.noise_floor_percentile,
-        )
+        dataset_config = self.experiment_config.dataset
+        if dataset_config.source_format == "npz":
+            dataset = PreparedPsdDataset.from_npz(
+                dataset_config.dataset_path,
+                preprocessor=self.preprocessor,
+                frames_key=dataset_config.frames_key,
+                frequency_grid_key=dataset_config.frequency_grid_key,
+                noise_floor_key=dataset_config.noise_floor_key,
+                noise_floor_window=dataset_config.noise_floor_window,
+                noise_floor_percentile=dataset_config.noise_floor_percentile,
+            )
+        else:
+            dataset = PreparedPsdDataset.from_campaigns(
+                dataset_config.dataset_path,
+                preprocessor=self.preprocessor,
+                include_campaign_globs=dataset_config.campaign_include_globs,
+                exclude_campaign_globs=dataset_config.campaign_exclude_globs,
+                include_node_globs=dataset_config.campaign_node_globs,
+                target_bin_count=dataset_config.campaign_target_bin_count,
+                value_scale=dataset_config.campaign_value_scale,
+                max_frames=dataset_config.campaign_max_frames,
+                noise_floor_window=dataset_config.noise_floor_window,
+                noise_floor_percentile=dataset_config.noise_floor_percentile,
+            )
         if dataset.reduced_bin_count != self.experiment_config.model.reduced_bin_count:
             raise CodecConfigurationError(
                 "Prepared dataset reduced_bin_count does not match the Torch model input size.",
             )
         return dataset.train_validation_split(
-            validation_fraction=self.experiment_config.dataset.validation_fraction,
-            seed=self.experiment_config.dataset.seed,
-            shuffle=self.experiment_config.dataset.shuffle,
+            validation_fraction=dataset_config.validation_fraction,
+            seed=dataset_config.seed,
+            shuffle=dataset_config.shuffle,
         )
 
     def fit(

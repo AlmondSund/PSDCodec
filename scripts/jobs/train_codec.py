@@ -4,9 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
-
-from pipelines.training import TrainingExperimentConfig, run_training_experiment
 
 
 def parse_args() -> argparse.Namespace:
@@ -23,6 +22,13 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     """Load the experiment configuration, run training, and print the saved artifacts."""
+    project_root = Path(__file__).resolve().parents[2]
+    src_root = project_root / "src"
+    if str(src_root) not in sys.path:
+        sys.path.insert(0, str(src_root))
+
+    from pipelines.training import TrainingExperimentConfig, run_training_experiment
+
     args = parse_args()
     experiment_config = TrainingExperimentConfig.from_yaml(args.config)
     summary = run_training_experiment(experiment_config, source_config_path=args.config)
