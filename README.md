@@ -37,9 +37,9 @@ For a new reader, the cleanest entry path is:
 
 1. Read **`README.md`** for project mission, scope, and repository-level orientation.
 2. Read **`STRUCTURE.md`** for folder semantics and repository boundaries.
-3. Read **`main.pdf`** for the mathematical framework and codec formulation.
+3. Read **`docs/articles/main.pdf`** for the mathematical framework and codec formulation.
 
-This README is the front door. `STRUCTURE.md` defines repository organization. `main.pdf` is the main theoretical reference.
+This README is the front door. `STRUCTURE.md` defines repository organization. `docs/articles/main.pdf` is the main theoretical reference.
 
 ---
 
@@ -83,7 +83,7 @@ Current materials already define:
 
 What is **not yet formally declared** by the current repository materials is a canonical installation path, package manager, CLI surface, or stable runtime entrypoint. This README therefore does not invent commands or workflows that the repository has not yet specified.
 
-Today, a new contributor can productively read **`main.pdf`**, inspect **`STRUCTURE.md`**, and use those documents to guide implementation work while treating runtime entrypoints as still under definition.
+Today, a new contributor can productively read **`docs/articles/main.pdf`**, inspect **`STRUCTURE.md`**, and use those documents to guide implementation work while treating runtime entrypoints as still under definition.
 
 ---
 
@@ -121,7 +121,7 @@ The current core references are:
 
 - **`README.md`** — repository-level orientation
 - **`STRUCTURE.md`** — directory semantics and organization contract
-- **`main.tex` / `main.pdf`** — mathematical framework and manuscript source
+- **`docs/articles/main.tex` / `docs/articles/main.pdf`** — mathematical framework and manuscript source
 
 As the project grows, additional design documents may be added for topics such as deployment boundaries, runtime interfaces, and evaluation policy.
 
