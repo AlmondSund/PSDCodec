@@ -1,0 +1,4 @@
+# Keep the data directory structure in Git, but ignore downloaded datasets.
+*
+!.gitignore
+!README.md
