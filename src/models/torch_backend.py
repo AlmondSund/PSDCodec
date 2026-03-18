@@ -233,6 +233,13 @@ else:  # pragma: no cover - exercised only when torch is unavailable
             """Reject construction without PyTorch."""
             raise ImportError("PyTorch is required to use the torch_backend module.")
 
+    class TorchTrainingOutput:
+        """Placeholder type raised when PyTorch is unavailable."""
+
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            """Reject construction without PyTorch."""
+            raise ImportError("PyTorch is required to use the torch_backend module.")
+
     class TorchMlpEncoder:
         """Placeholder class raised when PyTorch is unavailable."""
 
