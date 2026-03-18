@@ -9,11 +9,9 @@ from typing import Any
 try:
     import torch
     import torch.nn as nn
-    import torch.nn.functional as functional
 except ImportError:  # pragma: no cover - exercised only when torch is unavailable
     torch = None
     nn = None
-    functional = None
 
 
 @dataclass(frozen=True)
@@ -23,6 +21,7 @@ class TorchCodecConfig:
     reduced_bin_count: int  # Preprocessed frame length N_r
     latent_vector_count: int  # Number of latent positions M
     embedding_dim: int  # Latent dimension d
+    codebook_size: int  # Number of VQ codewords J
     hidden_dim: int = 256  # Width of the shared MLP hidden representation
     commitment_weight: float = 0.25  # β_com in the manuscript
 
@@ -37,6 +36,36 @@ if torch is not None:
         quantized_latents: torch.Tensor  # Detached codebook vectors
         indices: torch.Tensor  # Selected codeword indices
         vq_loss: torch.Tensor  # Stabilization loss LVQ
+
+    @dataclass(frozen=True)
+    class TorchTrainingOutput:
+        """Structured output of the full differentiable training-time codec."""
+
+        reconstructed_normalized_frames: torch.Tensor  # Decoder output û_t in normalized space
+        indices: torch.Tensor  # Discrete codeword indices for each latent position
+        vq_loss: torch.Tensor  # Stabilization loss LVQ
+        rate_bits: torch.Tensor  # Training-time rate proxy R_idx in bits per frame
+        quantized_latents: torch.Tensor  # Quantized latent vectors after codebook lookup
+
+    class TorchFactorizedEntropyModel(nn.Module):
+        """Learned factorized categorical model q_xi for latent indices."""
+
+        def __init__(self, alphabet_size: int) -> None:
+            """Initialize a learnable categorical prior over codeword indices."""
+            super().__init__()
+            self.logits = nn.Parameter(torch.zeros(alphabet_size, dtype=torch.float32))
+
+        def probabilities(self) -> torch.Tensor:
+            """Return the normalized symbol probabilities."""
+            return torch.softmax(self.logits, dim=0)
+
+        def rate_bits(self, indices: torch.Tensor) -> torch.Tensor:
+            """Return the per-frame rate proxy `-Σ log2 q(i_m)`."""
+            log_probabilities = torch.log_softmax(self.logits, dim=0)
+            gathered = log_probabilities[indices]
+            return -torch.sum(gathered, dim=1) / torch.log(
+                torch.tensor(2.0, device=indices.device, dtype=log_probabilities.dtype)
+            )
 
     class TorchMlpEncoder(nn.Module):
         """Inference-time encoder E_θ producing latent vectors before VQ assignment."""
@@ -127,19 +156,18 @@ if torch is not None:
         def __init__(
             self,
             config: TorchCodecConfig,
-            *,
-            codebook_size: int,  # Number of VQ codewords J
         ) -> None:
             """Construct encoder, vector quantizer, and decoder modules."""
             super().__init__()
             self.config = config
             self.encoder = TorchMlpEncoder(config)
             self.vector_quantizer = TorchVectorQuantizer(
-                codebook_size=codebook_size,
+                codebook_size=config.codebook_size,
                 embedding_dim=config.embedding_dim,
                 commitment_weight=config.commitment_weight,
             )
             self.decoder = TorchMlpDecoder(config)
+            self.entropy_model = TorchFactorizedEntropyModel(config.codebook_size)
 
         def encode_pre_quantization(self, normalized_frames: torch.Tensor) -> torch.Tensor:
             """Return encoder outputs before nearest-codeword assignment."""
@@ -148,17 +176,27 @@ if torch is not None:
         def forward(
             self,
             normalized_frames: torch.Tensor,  # Batched standardized frames [batch, N_r]
-        ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        ) -> TorchTrainingOutput:
             """Run the full differentiable codec forward pass."""
             latents = self.encoder(normalized_frames)
             quantization = self.vector_quantizer(latents)
             reconstructed = self.decoder(quantization.straight_through_latents)
-            return (
-                reconstructed,
-                quantization.indices,
-                quantization.vq_loss,
-                quantization.quantized_latents,
+            rate_bits = self.entropy_model.rate_bits(quantization.indices)
+            return TorchTrainingOutput(
+                reconstructed_normalized_frames=reconstructed,
+                indices=quantization.indices,
+                vq_loss=quantization.vq_loss,
+                rate_bits=rate_bits,
+                quantized_latents=quantization.quantized_latents,
             )
+
+        def export_runtime_codebook(self) -> Any:
+            """Return the current VQ codebook as a NumPy array."""
+            return self.vector_quantizer.codebook.detach().cpu().numpy()
+
+        def export_runtime_probabilities(self) -> Any:
+            """Return the learned factorized entropy probabilities as a NumPy array."""
+            return self.entropy_model.probabilities().detach().cpu().numpy()
 
         def export_encoder_to_onnx(
             self,
@@ -176,6 +214,7 @@ if torch is not None:
                 output_path,
                 export_params=True,
                 opset_version=opset_version,
+                dynamo=False,
                 input_names=["normalized_frame"],
                 output_names=["pre_quantization_latents"],
                 dynamic_axes={

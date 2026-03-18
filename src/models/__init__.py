@@ -2,5 +2,12 @@
 
 from models.base import LatentCodecModel
 from models.reference import ReferenceLinearCodecModel
+from models.torch_backend import TorchCodecConfig, TorchFullCodec, TorchTrainingOutput
 
-__all__ = ["LatentCodecModel", "ReferenceLinearCodecModel"]
+__all__ = [
+    "LatentCodecModel",
+    "ReferenceLinearCodecModel",
+    "TorchCodecConfig",
+    "TorchFullCodec",
+    "TorchTrainingOutput",
+]
