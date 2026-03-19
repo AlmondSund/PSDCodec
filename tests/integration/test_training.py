@@ -21,6 +21,7 @@ from objectives.training import RateDistortionLossConfig
 from pipelines.training import (
     ArtifactConfig,
     DatasetConfig,
+    EpochProgressUpdate,
     TorchCodecTrainer,
     TrainingConfig,
     TrainingExperimentConfig,
@@ -264,3 +265,22 @@ def test_training_can_load_raw_campaign_directories(tmp_path: Path) -> None:
 
     assert summary.best_checkpoint_path is not None
     assert summary.best_checkpoint_path.exists()
+
+
+def test_training_reports_epoch_progress_updates(tmp_path: Path) -> None:
+    """The trainer should expose one progress update per completed epoch."""
+    experiment_config = _make_experiment_config(tmp_path, export_onnx=False)
+    trainer = TorchCodecTrainer(experiment_config)
+    training_dataset, validation_dataset = trainer.load_prepared_datasets()
+    updates: list[EpochProgressUpdate] = []
+
+    summary = trainer.fit(
+        training_dataset,
+        validation_dataset,
+        progress_reporter=updates.append,
+    )
+
+    assert len(updates) == experiment_config.training.epoch_count
+    assert updates[-1].remaining_epoch_count == 0
+    assert updates[-1].completed_epoch_count == experiment_config.training.epoch_count
+    assert updates[-1].best_validation_loss == pytest.approx(summary.best_validation_loss)

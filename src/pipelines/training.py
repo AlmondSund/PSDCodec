@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import shutil
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -276,6 +277,17 @@ class TrainingSummary:
 
 
 @dataclass(frozen=True)
+class EpochProgressUpdate:
+    """Progress snapshot emitted after one completed training epoch."""
+
+    epoch_metrics: EpochMetrics  # Aggregated metrics for the completed epoch
+    completed_epoch_count: int  # Number of epochs completed so far
+    total_epoch_count: int  # Total epochs requested by the experiment
+    remaining_epoch_count: int  # Epochs still pending after this update
+    best_validation_loss: float  # Best validation loss observed so far
+
+
+@dataclass(frozen=True)
 class LoadedTrainingCheckpoint:
     """Typed view over a persisted training checkpoint."""
 
@@ -354,8 +366,18 @@ class TorchCodecTrainer:
         validation_dataset: PreparedPsdDataset,
         *,
         source_config_path: Path | None = None,
+        progress_reporter: Callable[[EpochProgressUpdate], None] | None = None,
     ) -> TrainingSummary:
-        """Train the codec, persist checkpoints, and export runtime artifacts."""
+        """Train the codec, persist checkpoints, and export runtime artifacts.
+
+        Args:
+            training_dataset: Prepared dataset used for optimization.
+            validation_dataset: Prepared dataset used for model selection.
+            source_config_path: Optional YAML path copied into the artifact directories.
+            progress_reporter: Optional callback invoked after each completed epoch.
+                This keeps terminal/UI reporting outside the trainer core while still
+                exposing epoch-by-epoch progress to CLI entrypoints.
+        """
         if TorchDataLoader is None:
             raise ImportError("PyTorch is required to construct training data loaders.")
         if training_dataset.original_bin_count != validation_dataset.original_bin_count:
@@ -462,6 +484,18 @@ class TorchCodecTrainer:
                         epoch_metrics=epoch_metrics,
                         best_validation_loss=best_validation_loss,
                     )
+            if progress_reporter is not None:
+                progress_reporter(
+                    EpochProgressUpdate(
+                        epoch_metrics=epoch_metrics,
+                        completed_epoch_count=epoch_index + 1,
+                        total_epoch_count=self.experiment_config.training.epoch_count,
+                        remaining_epoch_count=(
+                            self.experiment_config.training.epoch_count - epoch_index - 1
+                        ),
+                        best_validation_loss=best_validation_loss,
+                    )
+                )
 
         if best_model_state_dict is not None:
             self.model.load_state_dict(best_model_state_dict)
@@ -714,6 +748,7 @@ def run_training_experiment(
     experiment_config: TrainingExperimentConfig,
     *,
     source_config_path: Path | None = None,
+    progress_reporter: Callable[[EpochProgressUpdate], None] | None = None,
 ) -> TrainingSummary:
     """Load the configured dataset, train the model, and export artifacts."""
     trainer = TorchCodecTrainer(experiment_config)
@@ -722,6 +757,7 @@ def run_training_experiment(
         training_dataset,
         validation_dataset,
         source_config_path=source_config_path,
+        progress_reporter=progress_reporter,
     )
 
 

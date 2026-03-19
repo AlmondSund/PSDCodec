@@ -1,0 +1,28 @@
+{
+  "preprocessing": {
+    "reduced_bin_count": 256,
+    "resolution_factor": null,
+    "dynamic_range_offset": 1e-06,
+    "block_count": 8,
+    "stability_epsilon": 1e-06,
+    "mean_quantizer": {
+      "minimum": -20.0,
+      "maximum": 40.0,
+      "bits": 12
+    },
+    "log_sigma_quantizer": {
+      "minimum": -12.0,
+      "maximum": 8.0,
+      "bits": 10
+    }
+  },
+  "entropy_model": {
+    "alphabet_size": 256,
+    "precision_bits": 12,
+    "pseudo_count": 1.0
+  },
+  "packet_format": {
+    "magic": "PSDC",
+    "version": 1
+  }
+}

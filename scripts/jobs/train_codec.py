@@ -8,6 +8,26 @@ import sys
 from pathlib import Path
 
 
+def _print_epoch_progress(progress_update: object) -> None:
+    """Print one completed-epoch progress line for a generic training job."""
+    from pipelines.training import EpochProgressUpdate
+
+    if not isinstance(progress_update, EpochProgressUpdate):
+        raise TypeError("progress_update must be an EpochProgressUpdate instance.")
+    metrics = progress_update.epoch_metrics
+    print(
+        (
+            f"epoch {progress_update.completed_epoch_count}/"
+            f"{progress_update.total_epoch_count} complete | "
+            f"remaining_epochs={progress_update.remaining_epoch_count} | "
+            f"train_loss={metrics.training_loss:.6f} | "
+            f"val_loss={metrics.validation_loss:.6f} | "
+            f"best_val={progress_update.best_validation_loss:.6f}"
+        ),
+        flush=True,
+    )
+
+
 def parse_args() -> argparse.Namespace:
     """Parse the command-line arguments for the training job."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -31,7 +51,11 @@ def main() -> int:
 
     args = parse_args()
     experiment_config = TrainingExperimentConfig.from_yaml(args.config)
-    summary = run_training_experiment(experiment_config, source_config_path=args.config)
+    summary = run_training_experiment(
+        experiment_config,
+        source_config_path=args.config,
+        progress_reporter=_print_epoch_progress,
+    )
     print(f"best_epoch_index: {summary.best_epoch_index}")
     print(f"best_validation_loss: {summary.best_validation_loss:.6f}")
     print(f"best_checkpoint_path: {summary.best_checkpoint_path}")
