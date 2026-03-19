@@ -199,6 +199,21 @@ class OperationalCodec:
         packet: CodecPacket,  # Parsed codec packet
     ) -> tuple[np.ndarray, FloatArray]:
         """Decode a packet into both codeword indices and the reconstructed frame."""
+        expected_reduced_bin_count = self.config.preprocessing.resolve_reduced_bin_count(
+            packet.original_bin_count
+        )
+        if packet.reduced_bin_count != expected_reduced_bin_count:
+            raise CodecConfigurationError(
+                "Packet reduced_bin_count does not match the active preprocessing configuration."
+            )
+        if packet.block_count != self.config.preprocessing.block_count:
+            raise CodecConfigurationError(
+                "Packet block_count does not match the active preprocessing configuration."
+            )
+        if packet.latent_vector_count != self.model.latent_vector_count:
+            raise CodecConfigurationError(
+                "Packet latent_vector_count does not match the active model latent shape."
+            )
         side_information = self.packet_serializer.unpack_side_information(
             packet.side_information_payload,
             packet.side_information_bit_count,

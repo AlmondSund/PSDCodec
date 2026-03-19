@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -205,23 +206,51 @@ if torch is not None:
             batch_size: int = 1,  # Example batch size for tracing
             opset_version: int = 17,  # ONNX opset used by the export
         ) -> Path:
-            """Export the inference-time encoder boundary used by constrained devices."""
+            """Export the inference-time encoder with the modern torch.export-based path.
+
+            Purpose:
+                Serialize only the sensing-node encoder boundary to ONNX using the
+                recommended `torch.export`-backed exporter rather than the deprecated
+                TorchScript export path.
+
+            Args:
+                output_path: Destination `.onnx` file.
+                batch_size: Example batch size used during graph capture.
+                opset_version: ONNX opset requested for the exported graph.
+
+            Returns:
+                The saved ONNX file path.
+
+            Raises:
+                ImportError: If `onnxscript` is missing from the active environment.
+                RuntimeError: If the new exporter unexpectedly fails to return an
+                    ONNX program object.
+            """
+            if importlib.util.find_spec("onnxscript") is None:
+                raise ImportError(
+                    "onnxscript is required for the torch.export-based ONNX exporter. "
+                    "Install PSDCodec with the `onnx` extra or add `onnxscript` to "
+                    "the active environment."
+                )
+
             example = torch.zeros(batch_size, self.config.reduced_bin_count, dtype=torch.float32)
+            batch_dim = torch.export.Dim("batch_size")
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            torch.onnx.export(
+            onnx_program = torch.onnx.export(
                 self.encoder,
-                example,
-                output_path,
+                args=(example,),
+                f=None,
                 export_params=True,
                 opset_version=opset_version,
-                dynamo=False,
+                dynamo=True,
+                fallback=False,
                 input_names=["normalized_frame"],
                 output_names=["pre_quantization_latents"],
-                dynamic_axes={
-                    "normalized_frame": {0: "batch_size"},
-                    "pre_quantization_latents": {0: "batch_size"},
-                },
+                dynamic_shapes=({0: batch_dim},),
             )
+            if onnx_program is None:
+                raise RuntimeError("torch.onnx.export returned no ONNX program to serialize.")
+            onnx_program.save(str(output_path))
             return output_path
 
 else:  # pragma: no cover - exercised only when torch is unavailable

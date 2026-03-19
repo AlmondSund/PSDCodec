@@ -38,6 +38,7 @@ For a new reader, the cleanest entry path is:
 1. Read **`README.md`** for project mission, scope, and repository-level orientation.
 2. Read **`STRUCTURE.md`** for folder semantics and repository boundaries.
 3. Read **`docs/articles/main.pdf`** for the mathematical framework and codec formulation.
+4. Read **`docs/notes/DEPLOYMENT_BOUNDARY.md`** for the encoder-only ONNX deployment split.
 
 This README is the front door. `STRUCTURE.md` defines repository organization. `docs/articles/main.pdf` is the main theoretical reference.
 
@@ -70,35 +71,62 @@ At a high level:
 
 ## Available now
 
-The strongest part of the repository today is its **theoretical and architectural foundation**.
+The repository now implements the full codec workflow described in the manuscript:
 
-Current materials already define:
+- deterministic preprocessing and inverse preprocessing with explicit side information,
+- vector quantization and arithmetic coding for the latent index stream,
+- a PyTorch training pipeline with checkpointing and encoder export,
+- raw campaign ingestion from **`data/raw/campaigns/`**,
+- deployment helpers that keep the encoder-only ONNX boundary explicit,
+- and notebooks for deployment inspection and the manuscript's illustrative task demo.
 
-- the codec problem setting for PSD frame compression,
-- deterministic preprocessing and inverse preprocessing,
-- discrete latent coding with vector quantization,
-- explicit rate accounting,
-- task-aware evaluation as an optional extension,
-- and a repository structure designed for disciplined research software.
+The repository is intentionally kept **artifact-clean**: no trained checkpoints or
+exported models are committed. The canonical first run is the manuscript-backed
+**`demo`** experiment, which trains the illustrative sensing task described in
+**`docs/articles/main.tex`** and exports its deployment assets under
+**`models/exports/demo/`**.
 
-What is **not yet formally declared** by the current repository materials is a canonical installation path, package manager, CLI surface, or stable runtime entrypoint. This README therefore does not invent commands or workflows that the repository has not yet specified.
+The main operational entrypoints are:
 
-Today, a new contributor can productively read **`docs/articles/main.pdf`**, inspect **`STRUCTURE.md`**, and use those documents to guide implementation work while treating runtime entrypoints as still under definition.
+- **`scripts/jobs/prepare_campaign_dataset.py`** for harmonizing raw campaign PSD acquisitions,
+- **`scripts/jobs/train_codec.py`** for YAML-driven training,
+- **`scripts/jobs/train_demo.py`** for the canonical manuscript-backed demo model,
+- **`notebooks/demo_deploy.ipynb`** for the complete deployment and illustrative-task demo.
+
+## Theory-to-Code Map
+
+The manuscript is the normative mathematical reference. The implementation follows that structure directly:
+
+- **Deterministic preprocessing and side information**
+  - **`src/codec/preprocessing.py`**
+  - **`src/codec/quantization.py`**
+  - **`src/codec/torch_preprocessing.py`**
+- **Learned discrete latent codec**
+  - **`src/models/torch_backend.py`**
+  - **`src/models/reference.py`**
+- **Operational rate model and payload accounting**
+  - **`src/codec/entropy.py`**
+  - **`src/codec/arithmetic.py`**
+  - **`src/codec/packetization.py`**
+  - **`src/pipelines/runtime.py`**
+- **PSD distortion and illustrative sensing task**
+  - **`src/objectives/distortion.py`**
+  - **`src/objectives/training.py`**
+- **Training, export, and deployment boundary**
+  - **`src/pipelines/training.py`**
+  - **`src/interfaces/export.py`**
+  - **`src/interfaces/deployment.py`**
+  - **`docs/notes/DEPLOYMENT_BOUNDARY.md`**
 
 ---
 
 ## Near-term implementation priorities
 
-As implementation matures, near-term priorities include:
+Remaining priorities are no longer the basic codec itself, but the next layer of rigor:
 
-- concrete preprocessing and reconstruction modules,
-- trainable encoder/decoder/codebook components,
-- entropy-model and arithmetic-coding integration,
-- reproducible experiment and benchmarking scripts,
-- clearer runtime entrypoints,
-- and export-ready model artifacts.
-
-This is the intended implementation direction, not a claim that all of those components already exist.
+- stronger training-time and deployment-time result reporting,
+- optional richer entropy models beyond the current factorized baseline,
+- and continued tightening of theory-to-implementation traceability as the codec evolves.
 
 ---
 
@@ -122,6 +150,7 @@ The current core references are:
 - **`README.md`** — repository-level orientation
 - **`STRUCTURE.md`** — directory semantics and organization contract
 - **`docs/articles/main.tex` / `docs/articles/main.pdf`** — mathematical framework and manuscript source
+- **`docs/notes/DEPLOYMENT_BOUNDARY.md`** — deployment split and ONNX scope
 
 As the project grows, additional design documents may be added for topics such as deployment boundaries, runtime interfaces, and evaluation policy.
 

@@ -1,12 +1,13 @@
-"""Integration tests for training, checkpointing, and export."""
+"""Shared pytest fixtures for integration tests that need a trained demo export."""
 
 from __future__ import annotations
 
 import csv
 import json
+import os
+from dataclasses import dataclass
 from pathlib import Path
 
-import numpy as np
 import pytest
 
 from codec.config import (
@@ -24,14 +25,20 @@ from pipelines.training import (
     TorchCodecTrainer,
     TrainingConfig,
     TrainingExperimentConfig,
-    load_training_checkpoint,
+    TrainingSummary,
 )
 
-torch = pytest.importorskip("torch")
+
+@dataclass(frozen=True)
+class TrainedDemoArtifacts:
+    """Temporary repo-like demo artifacts produced for deployment integration tests."""
+
+    project_root: Path  # Root of the temporary repo-like layout
+    summary: TrainingSummary  # Training outputs saved under `project_root`
 
 
 def _write_tiny_campaign_dataset(campaign_root: Path) -> None:
-    """Write a small raw-campaign fixture compatible with the trainer."""
+    """Write a deterministic raw campaign directory for deployment-oriented tests."""
     campaign_dir = campaign_root / "RBW10"
     campaign_dir.mkdir(parents=True, exist_ok=True)
 
@@ -131,34 +138,17 @@ def _write_tiny_campaign_dataset(campaign_root: Path) -> None:
             )
 
 
-def _write_tiny_dataset(dataset_path: Path) -> None:
-    """Write a deterministic toy PSD dataset to disk."""
-    frames = np.asarray(
-        [
-            [1.0, 1.2, 2.0, 2.4, 2.0, 1.4, 1.0, 0.8],
-            [1.1, 1.3, 2.2, 2.5, 2.1, 1.5, 1.1, 0.9],
-            [0.9, 1.1, 1.9, 2.3, 1.9, 1.3, 0.9, 0.7],
-            [1.2, 1.4, 2.1, 2.6, 2.2, 1.6, 1.2, 1.0],
-            [0.8, 1.0, 1.8, 2.1, 1.8, 1.2, 0.8, 0.6],
-            [1.0, 1.1, 1.95, 2.35, 1.95, 1.35, 0.95, 0.75],
-        ],
-        dtype=np.float64,
-    )
-    frequency_grid_hz = np.linspace(100.0, 107.0, num=8, dtype=np.float64)
-    np.savez(dataset_path, frames=frames, frequency_grid_hz=frequency_grid_hz)
-
-
-def _make_experiment_config(tmp_path: Path, *, export_onnx: bool) -> TrainingExperimentConfig:
-    """Create a small CPU-only experiment configuration for smoke tests."""
-    dataset_path = tmp_path / "toy_dataset.npz"
-    _write_tiny_dataset(dataset_path)
+def _build_tiny_demo_experiment_config() -> TrainingExperimentConfig:
+    """Build a small relative-path experiment config for deployment smoke tests."""
     return TrainingExperimentConfig(
         dataset=DatasetConfig(
-            dataset_path=dataset_path,
+            dataset_path=Path("data/raw/campaigns"),
+            source_format="campaigns",
             noise_floor_window=2,
             validation_fraction=1.0 / 3.0,
             shuffle=True,
             seed=3,
+            campaign_target_bin_count=8,
         ),
         runtime=CodecRuntimeConfig(
             preprocessing=PreprocessingConfig(
@@ -190,77 +180,46 @@ def _make_experiment_config(tmp_path: Path, *, export_onnx: bool) -> TrainingExp
                 psd_weight=1.0,
                 rate_weight=1.0e-3,
                 vq_weight=1.0,
-                task_weight=0.1,
+                task_weight=0.05,
             ),
         ),
         artifacts=ArtifactConfig(
-            experiment_name="tiny_smoke",
-            checkpoint_root=tmp_path / "checkpoints",
-            export_root=tmp_path / "exports",
-            export_onnx=export_onnx,
+            experiment_name="demo",
+            checkpoint_root=Path("models/checkpoints"),
+            export_root=Path("models/exports"),
+            export_onnx=True,
         ),
-        task=IllustrativeTaskConfig(occupancy_margin=0.2, smoothing_window_bins=3),
+        task=IllustrativeTaskConfig(
+            occupancy_margin=5.0e-5,
+            occupancy_temperature=2.5e-5,
+            smoothing_window_bins=3,
+            huber_delta=1.0e5,
+            peak_weight=1.0e-12,
+            centroid_weight=1.0e-12,
+            bandwidth_weight=1.0e-9,
+        ),
     )
 
 
-def test_training_smoke_saves_checkpoint_and_runtime_assets(tmp_path: Path) -> None:
-    """A tiny training run should produce checkpoints and runtime codec assets."""
-    experiment_config = _make_experiment_config(tmp_path, export_onnx=False)
-    trainer = TorchCodecTrainer(experiment_config)
-    training_dataset, validation_dataset = trainer.load_prepared_datasets()
-    summary = trainer.fit(training_dataset, validation_dataset)
-
-    assert summary.best_checkpoint_path is not None
-    assert summary.best_checkpoint_path.exists()
-    assert summary.latest_checkpoint_path is not None
-    assert summary.latest_checkpoint_path.exists()
-    assert (summary.runtime_asset_dir / "codebook.npy").exists()
-    assert (summary.runtime_asset_dir / "entropy_probabilities.npy").exists()
-    loaded = load_training_checkpoint(summary.best_checkpoint_path)
-    assert loaded.experiment_config.model.codebook_size == 4
-    assert loaded.metrics.epoch_index == summary.best_epoch_index
-
-
-def test_training_export_writes_encoder_onnx(tmp_path: Path) -> None:
-    """Training should export the encoder boundary to ONNX when requested."""
-    onnx = pytest.importorskip("onnx")
+@pytest.fixture(scope="session")
+def trained_demo_artifacts(tmp_path_factory: pytest.TempPathFactory) -> TrainedDemoArtifacts:
+    """Train one tiny demo export under a temporary repo-like layout for deployment tests."""
+    pytest.importorskip("torch")
+    pytest.importorskip("onnx")
     pytest.importorskip("onnxscript")
-    experiment_config = _make_experiment_config(tmp_path, export_onnx=True)
-    trainer = TorchCodecTrainer(experiment_config)
-    training_dataset, validation_dataset = trainer.load_prepared_datasets()
-    summary = trainer.fit(training_dataset, validation_dataset)
+
+    project_root = tmp_path_factory.mktemp("demo_project")
+    campaign_root = project_root / "data" / "raw" / "campaigns"
+    _write_tiny_campaign_dataset(campaign_root)
+
+    original_cwd = Path.cwd()
+    os.chdir(project_root)
+    try:
+        trainer = TorchCodecTrainer(_build_tiny_demo_experiment_config())
+        training_dataset, validation_dataset = trainer.load_prepared_datasets()
+        summary = trainer.fit(training_dataset, validation_dataset)
+    finally:
+        os.chdir(original_cwd)
 
     assert summary.onnx_path is not None
-    assert summary.onnx_path.exists()
-    model = onnx.load(str(summary.onnx_path))
-    assert model.graph.input[0].name == "normalized_frame"
-    assert model.graph.output[0].name == "pre_quantization_latents"
-
-
-def test_training_can_load_raw_campaign_directories(tmp_path: Path) -> None:
-    """The trainer should ingest raw campaign directories as a first-class dataset source."""
-    campaign_root = tmp_path / "campaigns"
-    _write_tiny_campaign_dataset(campaign_root)
-    experiment_config = _make_experiment_config(tmp_path, export_onnx=False)
-    experiment_config = TrainingExperimentConfig(
-        dataset=DatasetConfig(
-            dataset_path=campaign_root,
-            source_format="campaigns",
-            noise_floor_window=2,
-            validation_fraction=1.0 / 3.0,
-            shuffle=True,
-            seed=3,
-            campaign_target_bin_count=8,
-        ),
-        runtime=experiment_config.runtime,
-        model=experiment_config.model,
-        training=experiment_config.training,
-        artifacts=experiment_config.artifacts,
-        task=experiment_config.task,
-    )
-    trainer = TorchCodecTrainer(experiment_config)
-    training_dataset, validation_dataset = trainer.load_prepared_datasets()
-    summary = trainer.fit(training_dataset, validation_dataset)
-
-    assert summary.best_checkpoint_path is not None
-    assert summary.best_checkpoint_path.exists()
+    return TrainedDemoArtifacts(project_root=project_root, summary=summary)

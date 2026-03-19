@@ -33,7 +33,7 @@ from objectives.training import (
     RateDistortionLossConfig,
     TrainingLossBreakdown,
     compose_rate_distortion_loss,
-    torch_occupancy_task_loss,
+    torch_illustrative_task_loss,
 )
 
 _torch: Any | None
@@ -114,7 +114,7 @@ class TrainingConfig:
     learning_rate: float = 1.0e-3  # Adam learning rate
     weight_decay: float = 0.0  # Adam weight decay
     gradient_clip_norm: float | None = 1.0  # Optional global gradient clipping threshold
-    device: str = "cpu"  # Torch device string
+    device: str = "cpu"  # Torch device string or `auto`
     loss: RateDistortionLossConfig = RateDistortionLossConfig()  # Lagrangian loss weights
 
     def __post_init__(self) -> None:
@@ -129,6 +129,8 @@ class TrainingConfig:
             raise CodecConfigurationError("weight_decay must be non-negative.")
         if self.gradient_clip_norm is not None and self.gradient_clip_norm <= 0.0:
             raise CodecConfigurationError("gradient_clip_norm must be strictly positive when set.")
+        if not self.device:
+            raise CodecConfigurationError("device must be a non-empty string.")
 
 
 @dataclass(frozen=True)
@@ -273,7 +275,8 @@ class TorchCodecTrainer:
         torch_module = _require_torch()
         self.experiment_config = experiment_config
         self.preprocessor = FramePreprocessor(experiment_config.runtime.preprocessing)
-        self.model = TorchFullCodec(experiment_config.model).to(experiment_config.training.device)
+        self.training_device = _resolve_training_device_string(experiment_config.training.device)
+        self.model = TorchFullCodec(experiment_config.model).to(self.training_device)
         self.optimizer = torch_module.optim.Adam(
             self.model.parameters(),
             lr=experiment_config.training.learning_rate,
@@ -310,6 +313,15 @@ class TorchCodecTrainer:
             raise CodecConfigurationError(
                 "Prepared dataset reduced_bin_count does not match the Torch model input size.",
             )
+        if self.experiment_config.task is not None:
+            if dataset.frequency_grid_hz is None:
+                raise CodecConfigurationError(
+                    "Illustrative task training requires dataset.frequency_grid_hz."
+                )
+            if dataset.noise_floors is None:
+                raise CodecConfigurationError(
+                    "Illustrative task training requires dataset.noise_floors."
+                )
         return dataset.train_validation_split(
             validation_fraction=dataset_config.validation_fraction,
             seed=dataset_config.seed,
@@ -484,6 +496,17 @@ class TorchCodecTrainer:
         torch_module = _require_torch()
         self.model.train(mode=training)
         aggregated = _AggregatedMetrics()
+        task_frequency_grid_hz = None
+        if self.experiment_config.task is not None:
+            if dataset_frequency_grid_hz is None:
+                raise CodecConfigurationError(
+                    "Illustrative task training requires dataset_frequency_grid_hz."
+                )
+            task_frequency_grid_hz = torch_module.as_tensor(
+                dataset_frequency_grid_hz,
+                dtype=torch_module.float32,
+                device=self.training_device,
+            )
 
         for batch in loader:
             tensor_batch = self._batch_to_tensors(batch)
@@ -504,10 +527,12 @@ class TorchCodecTrainer:
                             "Task loss requested but the dataset batch does not "
                             "contain noise floors.",
                         )
-                    task_loss_tensor = torch_occupancy_task_loss(
+                    assert task_frequency_grid_hz is not None
+                    task_loss_tensor = torch_illustrative_task_loss(
                         tensor_batch.original_frames,
                         reconstructed_frames,
                         noise_floors=tensor_batch.noise_floors,
+                        frequency_grid_hz=task_frequency_grid_hz,
                         config=self.experiment_config.task,
                     )
                 total_loss, breakdown = compose_rate_distortion_loss(
@@ -544,7 +569,7 @@ class TorchCodecTrainer:
     def _batch_to_tensors(self, batch: PreparedPsdBatch) -> _TorchBatch:
         """Move one NumPy batch onto the configured torch device."""
         torch_module = _require_torch()
-        device = torch_module.device(self.experiment_config.training.device)
+        device = torch_module.device(self.training_device)
         noise_floors = None
         if batch.noise_floors is not None:
             noise_floors = torch_module.as_tensor(
@@ -755,6 +780,21 @@ def _coerce_mapping(value: object) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise CodecConfigurationError("Expected a mapping in the experiment configuration.")
     return dict(value)
+
+
+def _resolve_training_device_string(
+    configured_device: str,  # Requested device string from the experiment config
+) -> str:
+    """Resolve `auto` device selection to a concrete torch device string."""
+    torch_module = _require_torch()
+    if configured_device != "auto":
+        return configured_device
+    if torch_module.cuda.is_available():
+        return "cuda"
+    mps_backend = getattr(torch_module.backends, "mps", None)
+    if mps_backend is not None and bool(mps_backend.is_available()):
+        return "mps"
+    return "cpu"
 
 
 def _expect_mapping(payload: dict[str, Any], key: str) -> dict[str, Any]:

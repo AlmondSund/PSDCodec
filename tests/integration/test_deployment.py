@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 
@@ -12,19 +10,18 @@ from interfaces.deployment import create_deployment_service, load_campaign_frame
 pytest.importorskip("onnxruntime")
 
 
-def test_exported_baseline_can_run_the_deployment_round_trip(
+def test_exported_demo_can_run_the_deployment_round_trip(
+    trained_demo_artifacts,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The exported baseline artifacts should encode and decode one real campaign frame."""
-    export_dir = Path("models/exports/baseline_psdcodec").resolve()
-    if not export_dir.exists():
-        pytest.skip("The baseline deployment artifacts are not present in this workspace.")
+    """The exported demo artifacts should encode and decode one campaign frame."""
+    export_dir = (
+        trained_demo_artifacts.project_root / trained_demo_artifacts.summary.export_dir
+    ).resolve()
 
-    # The deployment helpers should resolve experiment-relative asset paths even when the
-    # caller is not running from the repository root, which is how notebooks typically run.
-    notebooks_dir = export_dir.parents[2] / "notebooks"
-    if notebooks_dir.exists():
-        monkeypatch.chdir(notebooks_dir)
+    # The deployment helpers must resolve relative dataset and checkpoint paths even
+    # when the caller is outside the temporary repo root.
+    monkeypatch.chdir(export_dir.parent)
 
     service, artifacts = create_deployment_service(export_dir)
     sample = load_campaign_frame_sample(artifacts, frame_index=0)

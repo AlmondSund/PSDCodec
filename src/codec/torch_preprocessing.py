@@ -9,6 +9,7 @@ import numpy as np
 
 from codec.config import PreprocessingConfig
 from codec.exceptions import CodecConfigurationError
+from codec.preprocessing import build_linear_upsampling_matrix
 from utils import partition_slices
 
 _torch: Any | None
@@ -46,7 +47,7 @@ class DifferentiableInversePreprocessor:
             raise CodecConfigurationError("original_bin_count must be strictly positive.")
         reduced_bin_count = self.config.resolve_reduced_bin_count(self.original_bin_count)
         block_slices = partition_slices(reduced_bin_count, self.config.block_count)
-        upsampling_matrix = _build_linear_upsampling_matrix(
+        upsampling_matrix = build_linear_upsampling_matrix(
             original_bin_count=self.original_bin_count,
             reduced_bin_count=reduced_bin_count,
         )
@@ -96,40 +97,3 @@ class DifferentiableInversePreprocessor:
             device=reduced_frames.device,
         )
         return cast(Tensor, reduced_frames @ matrix.T)
-
-
-def _build_linear_upsampling_matrix(
-    *,
-    original_bin_count: int,
-    reduced_bin_count: int,
-) -> np.ndarray:
-    """Build a dense interpolation matrix matching the runtime linear upsampling rule."""
-    if reduced_bin_count <= 0:
-        raise CodecConfigurationError("reduced_bin_count must be strictly positive.")
-    if original_bin_count <= 0:
-        raise CodecConfigurationError("original_bin_count must be strictly positive.")
-    if reduced_bin_count == 1:
-        return np.ones((original_bin_count, 1), dtype=np.float64)
-
-    slices = partition_slices(original_bin_count, reduced_bin_count)
-    reduced_positions = np.asarray(
-        [(block.start + block.stop - 1) / 2.0 for block in slices],
-        dtype=np.float64,
-    )
-    weights = np.zeros((original_bin_count, reduced_bin_count), dtype=np.float64)
-    for output_index in range(original_bin_count):
-        position = float(output_index)
-        if position <= reduced_positions[0]:
-            weights[output_index, 0] = 1.0
-            continue
-        if position >= reduced_positions[-1]:
-            weights[output_index, -1] = 1.0
-            continue
-        right_index = int(np.searchsorted(reduced_positions, position, side="right"))
-        left_index = right_index - 1
-        left_position = reduced_positions[left_index]
-        right_position = reduced_positions[right_index]
-        alpha = (position - left_position) / (right_position - left_position)
-        weights[output_index, left_index] = 1.0 - alpha
-        weights[output_index, right_index] = alpha
-    return weights

@@ -55,6 +55,26 @@ class DistortionBreakdown:
     task_distortion: float | None = None  # Optional D_task
 
 
+@dataclass(frozen=True)
+class IllustrativeTaskBreakdown:
+    """Full breakdown of the manuscript's illustrative sensing task example.
+
+    This object exposes the exact occupancy and feature terms described in the paper's
+    illustrative sensing instantiation so notebooks and evaluations can inspect what
+    the optional task regularizer is rewarding or penalizing.
+    """
+
+    occupancy_loss: float  # D_occ
+    feature_loss: float  # D_feat
+    total_loss: float  # D_task,ex = β_occ D_occ + β_feat D_feat
+    reference_soft_occupancy: FloatArray  # p_t
+    reconstructed_soft_occupancy: FloatArray  # p̂_t
+    reference_hard_occupancy: np.ndarray  # o_t
+    reconstructed_hard_occupancy: np.ndarray  # ô_t
+    reference_features: IllustrativeFeatureSet  # f_ex from the reference frame
+    reconstructed_features: IllustrativeFeatureSet  # f̂_ex from the reconstructed frame
+
+
 def log_spectral_distortion(
     reference_frame: FloatArray,  # Ground-truth PSD frame s_t
     reconstructed_frame: FloatArray,  # Reconstructed PSD frame ŝ_t
@@ -104,33 +124,68 @@ def illustrative_task_loss(
     config: IllustrativeTaskConfig,
 ) -> float:
     """Compute the illustrative occupancy-plus-feature task regularizer."""
-    reference = as_1d_float_array(reference_frame, name="reference_frame")
-    reconstructed = as_1d_float_array(reconstructed_frame, name="reconstructed_frame")
-    baseline = as_1d_float_array(noise_floor, name="noise_floor")
-    frequency_grid = as_1d_float_array(
-        frequency_grid_hz, name="frequency_grid_hz", allow_negative=True
-    )
-    if not (reference.shape == reconstructed.shape == baseline.shape == frequency_grid.shape):
-        raise CodecConfigurationError(
-            "reference_frame, reconstructed_frame, noise_floor, and frequency_grid_hz must align."
-        )
+    return build_illustrative_task_breakdown(
+        reference_frame,
+        reconstructed_frame,
+        noise_floor=noise_floor,
+        frequency_grid_hz=frequency_grid_hz,
+        config=config,
+    ).total_loss
 
-    reference_soft = _soft_occupancy(reference, baseline, config)
-    reconstructed_soft = _soft_occupancy(reconstructed, baseline, config)
+
+def build_illustrative_task_breakdown(
+    reference_frame: FloatArray,  # Ground-truth PSD frame s_t
+    reconstructed_frame: FloatArray,  # Reconstructed PSD frame ŝ_t
+    *,
+    noise_floor: FloatArray,  # Reference noise floor \bar{n}_t
+    frequency_grid_hz: FloatArray,  # Frequency grid ω_n expressed in Hz
+    config: IllustrativeTaskConfig,
+) -> IllustrativeTaskBreakdown:
+    """Return the full illustrative sensing-task breakdown from the manuscript.
+
+    Purpose:
+        Expose the exact occupancy and feature-preservation quantities used by the
+        paper's example task so demos can inspect both the scalar loss components and
+        the intermediate occupancy/feature representations.
+    """
+    reference, reconstructed, baseline, frequency_grid = _validate_task_inputs(
+        reference_frame,
+        reconstructed_frame,
+        noise_floor=noise_floor,
+        frequency_grid_hz=frequency_grid_hz,
+    )
+    reference_soft = soft_occupancy(
+        reference,
+        noise_floor=baseline,
+        config=config,
+    )
+    reconstructed_soft = soft_occupancy(
+        reconstructed,
+        noise_floor=baseline,
+        config=config,
+    )
     occupancy_term = _occupancy_consistency(reference_soft, reconstructed_soft, config)
 
-    reference_hard = reference_soft >= 0.5
-    reconstructed_hard = reconstructed_soft >= 0.5
-    reference_features = _extract_illustrative_features(
+    reference_hard = hard_occupancy(
         reference,
-        frequency_grid,
-        reference_hard,
+        noise_floor=baseline,
+        config=config,
+    )
+    reconstructed_hard = hard_occupancy(
+        reconstructed,
+        noise_floor=baseline,
+        config=config,
+    )
+    reference_features = extract_illustrative_features(
+        reference,
+        frequency_grid_hz=frequency_grid,
+        occupancy_mask=reference_hard,
         smoothing_window_bins=config.smoothing_window_bins,
     )
-    reconstructed_features = _extract_illustrative_features(
+    reconstructed_features = extract_illustrative_features(
         reconstructed,
-        frequency_grid,
-        reconstructed_hard,
+        frequency_grid_hz=frequency_grid,
+        occupancy_mask=reconstructed_hard,
         smoothing_window_bins=config.smoothing_window_bins,
     )
     feature_term = _feature_preservation_loss(
@@ -138,7 +193,84 @@ def illustrative_task_loss(
         reconstructed_features,
         config=config,
     )
-    return config.occupancy_weight * occupancy_term + config.feature_weight * feature_term
+    total_loss = config.occupancy_weight * occupancy_term + config.feature_weight * feature_term
+    return IllustrativeTaskBreakdown(
+        occupancy_loss=occupancy_term,
+        feature_loss=feature_term,
+        total_loss=total_loss,
+        reference_soft_occupancy=reference_soft,
+        reconstructed_soft_occupancy=reconstructed_soft,
+        reference_hard_occupancy=reference_hard,
+        reconstructed_hard_occupancy=reconstructed_hard,
+        reference_features=reference_features,
+        reconstructed_features=reconstructed_features,
+    )
+
+
+def soft_occupancy(
+    frame: FloatArray,  # PSD frame to threshold softly
+    *,
+    noise_floor: FloatArray,  # Reference baseline
+    config: IllustrativeTaskConfig,
+) -> FloatArray:
+    """Compute the manuscript soft occupancy proxy p_{t,n} for one PSD frame."""
+    candidate_frame = as_1d_float_array(frame, name="frame")
+    baseline = as_1d_float_array(noise_floor, name="noise_floor")
+    if candidate_frame.shape != baseline.shape:
+        raise CodecConfigurationError("frame and noise_floor must have the same shape.")
+    return _soft_occupancy(candidate_frame, baseline, config)
+
+
+def hard_occupancy(
+    frame: FloatArray,  # PSD frame to threshold after soft occupancy
+    *,
+    noise_floor: FloatArray,  # Reference baseline
+    config: IllustrativeTaskConfig,
+) -> np.ndarray:
+    """Compute the manuscript hard occupancy mask o_{t,n} for one PSD frame."""
+    return soft_occupancy(
+        frame,
+        noise_floor=noise_floor,
+        config=config,
+    ) >= 0.5
+
+
+def extract_illustrative_features(
+    frame: FloatArray,  # PSD frame from which features are extracted
+    *,
+    frequency_grid_hz: FloatArray,  # Frequency support ω_n
+    occupancy_mask: np.ndarray,  # Hard occupancy mask o_{t,n}
+    smoothing_window_bins: int,
+) -> IllustrativeFeatureSet:
+    """Extract the manuscript illustrative features from one PSD frame.
+
+    Args:
+        frame: PSD frame in linear power.
+        frequency_grid_hz: Uniform frequency support aligned with `frame`.
+        occupancy_mask: Boolean occupancy mask defined from the same frequency grid.
+        smoothing_window_bins: Odd moving-average window used only for peak extraction.
+    """
+    candidate_frame = as_1d_float_array(frame, name="frame")
+    frequency_grid = as_1d_float_array(
+        frequency_grid_hz,
+        name="frequency_grid_hz",
+        allow_negative=True,
+    )
+    mask = np.asarray(occupancy_mask, dtype=bool)
+    if candidate_frame.shape != frequency_grid.shape or candidate_frame.shape != mask.shape:
+        raise CodecConfigurationError(
+            "frame, frequency_grid_hz, and occupancy_mask must have the same shape."
+        )
+    if smoothing_window_bins <= 0 or smoothing_window_bins % 2 == 0:
+        raise CodecConfigurationError(
+            "smoothing_window_bins must be a positive odd integer."
+        )
+    return _extract_illustrative_features(
+        candidate_frame,
+        frequency_grid,
+        mask,
+        smoothing_window_bins=smoothing_window_bins,
+    )
 
 
 def build_distortion_breakdown(
@@ -180,7 +312,38 @@ def _soft_occupancy(
 ) -> FloatArray:
     """Compute the differentiable occupancy proxy p_{t,n}."""
     logits = (frame - noise_floor - config.occupancy_margin) / config.occupancy_temperature
-    return 1.0 / (1.0 + np.exp(-logits))
+
+    # Use a numerically stable logistic evaluation so high-SNR campaign frames do not
+    # emit overflow warnings while still saturating cleanly toward 0 or 1.
+    probabilities = np.empty_like(logits, dtype=np.float64)
+    positive_mask = logits >= 0.0
+    probabilities[positive_mask] = 1.0 / (1.0 + np.exp(-logits[positive_mask]))
+    negative_logits = np.exp(logits[~positive_mask])
+    probabilities[~positive_mask] = negative_logits / (1.0 + negative_logits)
+    return probabilities
+
+
+def _validate_task_inputs(
+    reference_frame: FloatArray,
+    reconstructed_frame: FloatArray,
+    *,
+    noise_floor: FloatArray,
+    frequency_grid_hz: FloatArray,
+) -> tuple[FloatArray, FloatArray, FloatArray, FloatArray]:
+    """Validate the aligned arrays needed by the illustrative task example."""
+    reference = as_1d_float_array(reference_frame, name="reference_frame")
+    reconstructed = as_1d_float_array(reconstructed_frame, name="reconstructed_frame")
+    baseline = as_1d_float_array(noise_floor, name="noise_floor")
+    frequency_grid = as_1d_float_array(
+        frequency_grid_hz,
+        name="frequency_grid_hz",
+        allow_negative=True,
+    )
+    if not (reference.shape == reconstructed.shape == baseline.shape == frequency_grid.shape):
+        raise CodecConfigurationError(
+            "reference_frame, reconstructed_frame, noise_floor, and frequency_grid_hz must align."
+        )
+    return reference, reconstructed, baseline, frequency_grid
 
 
 def _occupancy_consistency(
@@ -208,6 +371,7 @@ def _extract_illustrative_features(
     total_power = float(np.sum(frame))
     centroid = float(np.sum(frequency_grid_hz * frame) / total_power) if total_power > 0.0 else 0.0
 
+    dominant_component_power = 0.0
     dominant_bandwidth_hz = 0.0
     for component in _connected_components(occupancy_mask):
         component_power = float(np.sum(frame[component]))
@@ -216,7 +380,10 @@ def _extract_illustrative_features(
         current_bandwidth = float(
             frequency_grid_hz[component.stop - 1] - frequency_grid_hz[component.start]
         )
-        if current_bandwidth >= dominant_bandwidth_hz:
+        # The manuscript selects the occupied connected component with the largest
+        # integrated spectral mass, then reports that component's bandwidth.
+        if component_power >= dominant_component_power:
+            dominant_component_power = component_power
             dominant_bandwidth_hz = current_bandwidth
 
     return IllustrativeFeatureSet(
@@ -257,9 +424,18 @@ def _moving_average(
     *,
     window_length: int,
 ) -> FloatArray:
-    """Smooth a frame with a normalized moving-average filter."""
+    """Smooth a frame with a constant-spectrum-preserving moving-average filter."""
+    if window_length <= 0 or window_length % 2 == 0:
+        raise CodecConfigurationError("window_length must be a positive odd integer.")
+    if window_length == 1:
+        return frame.copy()
+
+    # Edge replication preserves both non-negativity and constant spectra, which is
+    # the admissibility requirement stated in the manuscript for the feature smoother.
+    radius = window_length // 2
+    padded = np.pad(frame, pad_width=radius, mode="edge")
     kernel = np.full(window_length, 1.0 / window_length, dtype=np.float64)
-    return np.convolve(frame, kernel, mode="same")
+    return np.convolve(padded, kernel, mode="valid")
 
 
 def _connected_components(mask: np.ndarray) -> tuple[slice, ...]:

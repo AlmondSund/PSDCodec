@@ -13,6 +13,62 @@ from codec.types import PreprocessingArtifacts, QuantizedSideInformation
 from utils import FloatArray, as_1d_float_array, partition_slices
 
 
+def build_linear_upsampling_matrix(
+    *,
+    original_bin_count: int,  # Desired PSD length N
+    reduced_bin_count: int,  # Reduced-resolution PSD length N_r
+) -> FloatArray:
+    """Build the dense interpolation matrix for the admissible linear upsampler.
+
+    Purpose:
+        Make the runtime and training-time inverse preprocessing paths share the exact
+        same interpolation rule so they cannot silently drift apart.
+    """
+    if original_bin_count <= 0:
+        raise CodecConfigurationError("original_bin_count must be strictly positive.")
+    if reduced_bin_count <= 0:
+        raise CodecConfigurationError("reduced_bin_count must be strictly positive.")
+    if reduced_bin_count == 1:
+        return np.ones((original_bin_count, 1), dtype=np.float64)
+
+    slices = partition_slices(original_bin_count, reduced_bin_count)
+    reduced_positions = np.asarray(
+        [(block.start + block.stop - 1) / 2.0 for block in slices],
+        dtype=np.float64,
+    )
+    weights = np.zeros((original_bin_count, reduced_bin_count), dtype=np.float64)
+    for output_index in range(original_bin_count):
+        position = float(output_index)
+        if position <= reduced_positions[0]:
+            weights[output_index, 0] = 1.0
+            continue
+        if position >= reduced_positions[-1]:
+            weights[output_index, -1] = 1.0
+            continue
+        right_index = int(np.searchsorted(reduced_positions, position, side="right"))
+        left_index = right_index - 1
+        left_position = reduced_positions[left_index]
+        right_position = reduced_positions[right_index]
+        alpha = (position - left_position) / (right_position - left_position)
+        weights[output_index, left_index] = 1.0 - alpha
+        weights[output_index, right_index] = alpha
+    return weights
+
+
+def upsample_frame_linear(
+    reduced_frame: FloatArray,  # Reduced-resolution non-negative PSD frame
+    *,
+    original_bin_count: int,  # Desired output length N
+) -> FloatArray:
+    """Upsample a reduced PSD frame with the shared linear interpolation rule."""
+    frame = as_1d_float_array(reduced_frame, name="reduced_frame")
+    matrix = build_linear_upsampling_matrix(
+        original_bin_count=original_bin_count,
+        reduced_bin_count=frame.size,
+    )
+    return np.clip(matrix @ frame, 0.0, None)
+
+
 @dataclass
 class FramePreprocessor:
     """Deterministic preprocessing chain described in the manuscript."""
@@ -118,17 +174,10 @@ class FramePreprocessor:
         original_bin_count: int,  # Desired output length N
     ) -> FloatArray:
         """Upsample a reduced PSD frame by linear interpolation on block centers."""
-        if reduced_frame.size == 1:
-            return np.full(original_bin_count, float(reduced_frame[0]), dtype=np.float64)
-
-        slices = partition_slices(original_bin_count, reduced_frame.size)
-        reduced_positions = np.asarray(
-            [(block.start + block.stop - 1) / 2.0 for block in slices],
-            dtype=np.float64,
+        return upsample_frame_linear(
+            reduced_frame,
+            original_bin_count=original_bin_count,
         )
-        original_positions = np.arange(original_bin_count, dtype=np.float64)
-        upsampled = np.interp(original_positions, reduced_positions, reduced_frame)
-        return np.clip(upsampled, 0.0, None)
 
     def _block_statistics(
         self,
