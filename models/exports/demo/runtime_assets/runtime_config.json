@@ -1,9 +1,9 @@
 {
   "preprocessing": {
-    "reduced_bin_count": 256,
+    "reduced_bin_count": 512,
     "resolution_factor": null,
     "dynamic_range_offset": 1e-06,
-    "block_count": 8,
+    "block_count": 16,
     "stability_epsilon": 1e-06,
     "mean_quantizer": {
       "minimum": -20.0,
