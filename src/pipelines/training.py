@@ -58,6 +58,26 @@ def _require_torch() -> Any:
     return _torch
 
 
+def _raise_if_non_finite_tensor(
+    value: Tensor,  # Tensor whose entries must all be finite
+    *,
+    name: str,
+) -> None:
+    """Raise a precise floating-point error when a tensor contains NaN or Inf.
+
+    Purpose:
+        Surface numerical instability at the training boundary where it first becomes
+        observable, instead of letting non-finite tensors fail later inside monitoring
+        or serialization code with a less actionable traceback.
+    """
+    torch_module = _require_torch()
+    if not bool(torch_module.isfinite(value).all().item()):
+        raise FloatingPointError(
+            f"{name} contains non-finite values. This indicates numerical instability "
+            "in the training path before exact task monitoring.",
+        )
+
+
 @dataclass(frozen=True)
 class DatasetConfig:
     """Dataset loading configuration for one training experiment."""
@@ -517,6 +537,10 @@ class TorchCodecTrainer:
                     tensor_batch.side_means,
                     tensor_batch.side_log_sigmas,
                 )
+                _raise_if_non_finite_tensor(
+                    reconstructed_frames,
+                    name="reconstructed_frames",
+                )
                 task_loss_tensor = None
                 if (
                     self.experiment_config.task is not None
@@ -545,6 +569,7 @@ class TorchCodecTrainer:
                     weights=self.experiment_config.training.loss,
                     task_loss=task_loss_tensor,
                 )
+                _raise_if_non_finite_tensor(total_loss, name="total_loss")
 
                 if training:
                     self.optimizer.zero_grad()

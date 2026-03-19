@@ -64,3 +64,20 @@ def test_differentiable_inverse_preprocessing_matches_runtime_inverse() -> None:
     ).detach().cpu().numpy()
 
     np.testing.assert_allclose(reconstructed, expected, atol=1.0e-6)
+
+
+def test_differentiable_inverse_preprocessing_saturates_extreme_positive_values() -> None:
+    """Large positive decoder outputs should stay finite after inverse preprocessing."""
+    torch = pytest.importorskip("torch")
+    config = _make_config()
+    inverse_preprocessor = DifferentiableInversePreprocessor(config, original_bin_count=8)
+
+    reconstructed = inverse_preprocessor.inverse_preprocess_batch(
+        torch.full((2, 4), 1.0e6, dtype=torch.float32),
+        torch.zeros((2, 2), dtype=torch.float32),
+        torch.zeros((2, 2), dtype=torch.float32),
+    )
+
+    reconstructed_np = reconstructed.detach().cpu().numpy()
+    assert np.all(np.isfinite(reconstructed_np))
+    assert np.all(reconstructed_np >= 0.0)

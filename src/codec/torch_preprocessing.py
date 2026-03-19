@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Final, cast
 
 import numpy as np
 
@@ -23,12 +23,32 @@ if TYPE_CHECKING:
 else:
     Tensor = Any
 
+_EXP_SAFETY_MARGIN_NATS: Final[float] = 2.0
+
 
 def _require_torch() -> Any:
     """Return the imported torch module or raise a precise error."""
     if _torch is None:
         raise ImportError("PyTorch is required to use codec.torch_preprocessing.")
     return _torch
+
+
+def _maximum_finite_exp_argument(
+    *,
+    tensor_dtype: Any,  # Torch floating-point dtype used for the inverse map
+    dynamic_range_offset: float,  # Positive κ in exp(x) - κ
+) -> float:
+    """Return a conservative upper bound for the exponent input.
+
+    Purpose:
+        The decoder output is unconstrained, so large positive normalized values can
+        make `exp(mapped_frame)` overflow during inverse preprocessing. This helper
+        computes a dtype-aware saturation threshold that keeps the reconstructed PSD
+        finite while preserving the nominal inverse map on all normal operating values.
+    """
+    torch_module = _require_torch()
+    dtype_info = torch_module.finfo(tensor_dtype)
+    return float(np.log(float(dtype_info.max) + dynamic_range_offset)) - _EXP_SAFETY_MARGIN_NATS
 
 
 @dataclass(frozen=True)
@@ -66,7 +86,15 @@ class DifferentiableInversePreprocessor:
         block_means: Tensor,  # Quantized block means with shape [batch, B]
         block_log_sigmas: Tensor,  # Quantized block log standard deviations with shape [batch, B]
     ) -> Tensor:
-        """Invert standardization, log mapping, and upsampling for one batch."""
+        """Invert standardization, log mapping, and upsampling for one batch.
+
+        Purpose:
+            Reconstruct full-resolution PSD frames for training-time distortion
+            evaluation while keeping the inverse log map numerically stable. Decoder
+            outputs are unconstrained, so the exponent input is saturated to the
+            largest safe finite value for the active tensor dtype before applying
+            `exp(x) - κ`.
+        """
         torch_module = _require_torch()
         if normalized_frames.ndim != 2:
             raise CodecConfigurationError(
@@ -88,6 +116,14 @@ class DifferentiableInversePreprocessor:
             mapped_frames[:, block] = normalized_frames[:, block] * sigmas[
                 :, block_index
             ].unsqueeze(1) + block_means[:, block_index].unsqueeze(1)
+
+        # Saturate only the positive tail so valid values remain unchanged while the
+        # inverse log map cannot overflow to `inf` on unstable decoder outputs.
+        max_exp_argument = _maximum_finite_exp_argument(
+            tensor_dtype=mapped_frames.dtype,
+            dynamic_range_offset=self.config.dynamic_range_offset,
+        )
+        mapped_frames = torch_module.clamp(mapped_frames, max=max_exp_argument)
 
         reduced_frames = torch_module.exp(mapped_frames) - self.config.dynamic_range_offset
         reduced_frames = torch_module.clamp(reduced_frames, min=0.0)
