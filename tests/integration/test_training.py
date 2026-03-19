@@ -21,10 +21,13 @@ from objectives.training import RateDistortionLossConfig
 from pipelines.training import (
     ArtifactConfig,
     DatasetConfig,
+    EpochMetrics,
     EpochProgressUpdate,
     TorchCodecTrainer,
     TrainingConfig,
     TrainingExperimentConfig,
+    _compose_validation_deployment_score,
+    _selection_candidate_is_acceptable,
     load_training_checkpoint,
 )
 
@@ -287,3 +290,81 @@ def test_training_reports_epoch_progress_updates(tmp_path: Path) -> None:
     assert updates[-1].completed_epoch_count == experiment_config.training.epoch_count
     assert updates[-1].best_selection_score == pytest.approx(summary.best_selection_score)
     assert updates[-1].best_validation_loss == pytest.approx(summary.best_validation_loss)
+
+
+def test_deployment_score_reports_preprocessing_relative_parity() -> None:
+    """The deployment selection score should equal the preprocessing-relative ratio."""
+    deployment_score = _compose_validation_deployment_score(
+        validation_psd_loss=0.10,
+        validation_preprocessing_psd_loss=0.20,
+        validation_peak_frequency_error_hz=50_000.0,
+        validation_preprocessing_peak_frequency_error_hz=100_000.0,
+        validation_peak_power_error_db=2.0,
+        validation_preprocessing_peak_power_error_db=4.0,
+        validation_task_monitor=3.0,
+        validation_preprocessing_task_monitor=6.0,
+    )
+
+    expected_score = (
+        0.35 * ((0.10 + 0.02) / (0.20 + 0.02))
+        + 0.45 * ((50_000.0 + 25_000.0) / (100_000.0 + 25_000.0))
+        + 0.10 * ((2.0 + 1.0) / (4.0 + 1.0))
+        + 0.10 * ((3.0 + 0.25) / (6.0 + 0.25))
+    )
+    assert deployment_score == pytest.approx(expected_score)
+
+
+def test_selection_guard_rejects_epochs_that_do_not_beat_preprocessing() -> None:
+    """The optional selection guard should reject non-improving checkpoints."""
+    losing_epoch = EpochMetrics(
+        epoch_index=0,
+        training_loss=1.0,
+        validation_loss=1.0,
+        training_psd_loss=0.5,
+        validation_psd_loss=0.5,
+        training_rate_bits=10.0,
+        validation_rate_bits=10.0,
+        training_vq_loss=0.1,
+        validation_vq_loss=0.1,
+        training_task_loss=0.2,
+        validation_task_loss=0.2,
+        validation_deployment_score=1.05,
+    )
+    winning_epoch = EpochMetrics(
+        epoch_index=1,
+        training_loss=0.9,
+        validation_loss=0.9,
+        training_psd_loss=0.4,
+        validation_psd_loss=0.4,
+        training_rate_bits=9.0,
+        validation_rate_bits=9.0,
+        training_vq_loss=0.1,
+        validation_vq_loss=0.1,
+        training_task_loss=0.2,
+        validation_task_loss=0.2,
+        validation_deployment_score=0.95,
+    )
+
+    assert not _selection_candidate_is_acceptable(
+        losing_epoch,
+        require_selection_to_beat_preprocessing=True,
+    )
+    assert _selection_candidate_is_acceptable(
+        winning_epoch,
+        require_selection_to_beat_preprocessing=True,
+    )
+
+
+def test_training_records_deployment_aligned_validation_metrics(tmp_path: Path) -> None:
+    """Validation history should expose deployment-aligned exact metrics."""
+    experiment_config = _make_experiment_config(tmp_path, export_onnx=False)
+    trainer = TorchCodecTrainer(experiment_config)
+    training_dataset, validation_dataset = trainer.load_prepared_datasets()
+
+    summary = trainer.fit(training_dataset, validation_dataset)
+    final_epoch = summary.history[-1]
+
+    assert final_epoch.validation_preprocessing_psd_loss is not None
+    assert final_epoch.validation_peak_frequency_error_hz is not None
+    assert final_epoch.validation_peak_power_error_db is not None
+    assert final_epoch.validation_deployment_score is not None

@@ -13,12 +13,16 @@ def test_demo_yaml_points_to_the_canonical_manuscript_run() -> None:
 
     assert config.artifacts.experiment_name == "demo"
     assert config.artifacts.export_onnx
-    assert config.artifacts.selection_metric == "validation_task_monitor"
+    assert config.artifacts.selection_metric == "validation_deployment_score"
+    assert config.artifacts.require_selection_to_beat_preprocessing
     assert config.dataset.source_format == "campaigns"
     assert config.dataset.dataset_path == Path("data/raw/campaigns")
-    assert config.runtime.preprocessing.reduced_bin_count == 512
-    assert config.model.reduced_bin_count == 512
-    assert config.model.latent_vector_count == 128
+    assert config.runtime.preprocessing.reduced_bin_count == 1024
+    assert config.runtime.preprocessing.block_count == 32
+    assert config.runtime.entropy_model.alphabet_size == 512
+    assert config.model.reduced_bin_count == 1024
+    assert config.model.latent_vector_count == 256
+    assert config.model.codebook_size == 512
     assert config.training.device == "auto"
     assert config.task is not None
 

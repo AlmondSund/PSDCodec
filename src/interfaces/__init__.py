@@ -1,7 +1,7 @@
 """Public repository interfaces for operational codec use and model export."""
 
-from interfaces.api import PsdCodecService
-from interfaces.deployment import (
+from .api import PsdCodecService
+from .deployment import (
     CampaignFrameSample,
     DeploymentArtifacts,
     DeploymentBatchReport,
@@ -19,7 +19,7 @@ from interfaces.deployment import (
     load_runtime_config_json,
     select_gallery_frames,
 )
-from interfaces.export import export_encoder_to_onnx
+from .export import export_encoder_to_onnx
 
 __all__ = [
     "DeploymentBatchReport",

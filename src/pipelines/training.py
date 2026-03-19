@@ -54,11 +54,28 @@ else:
 _SELECTION_METRICS: frozenset[str] = frozenset(
     {
         "validation_loss",
+        "validation_deployment_score",
         "validation_psd_loss",
         "validation_task_loss",
         "validation_task_monitor",
     }
 )
+
+_DEPLOYMENT_SELECTION_COMPONENT_WEIGHTS: dict[str, float] = {
+    "psd": 0.35,
+    "peak_frequency": 0.45,
+    "peak_power": 0.10,
+    "task": 0.10,
+}
+
+_DEPLOYMENT_SELECTION_COMPONENT_STABILIZERS: dict[str, float] = {
+    # These additive floors keep the preprocessing-relative score numerically stable
+    # when the deterministic baseline is already very strong on a component.
+    "psd": 0.02,
+    "peak_frequency": 25_000.0,
+    "peak_power": 1.0,
+    "task": 0.25,
+}
 
 
 def _require_torch() -> Any:
@@ -174,6 +191,9 @@ class ArtifactConfig:
     save_latest_checkpoint: bool = True  # Whether to persist the latest checkpoint every epoch
     save_best_checkpoint: bool = True  # Whether to persist the best validation checkpoint
     selection_metric: str = "validation_loss"  # Metric used to pick the best checkpoint
+    require_selection_to_beat_preprocessing: bool = (
+        False  # Reject best-checkpoint candidates that do not beat preprocessing-only
+    )
 
     def __post_init__(self) -> None:
         """Validate artifact and checkpoint-selection settings."""
@@ -278,6 +298,13 @@ class EpochMetrics:
     training_task_loss: float
     validation_task_loss: float
     validation_task_monitor: float | None = None
+    validation_preprocessing_psd_loss: float | None = None
+    validation_preprocessing_task_monitor: float | None = None
+    validation_peak_frequency_error_hz: float | None = None
+    validation_peak_power_error_db: float | None = None
+    validation_preprocessing_peak_frequency_error_hz: float | None = None
+    validation_preprocessing_peak_power_error_db: float | None = None
+    validation_deployment_score: float | None = None
 
 
 @dataclass(frozen=True)
@@ -473,6 +500,20 @@ class TorchCodecTrainer:
                 training=False,
                 dataset_frequency_grid_hz=validation_dataset.frequency_grid_hz,
             )
+            validation_deployment_score = _compose_validation_deployment_score(
+                validation_psd_loss=validation_metrics.psd_loss,
+                validation_preprocessing_psd_loss=validation_metrics.preprocessing_psd_loss,
+                validation_peak_frequency_error_hz=validation_metrics.peak_frequency_error_hz,
+                validation_preprocessing_peak_frequency_error_hz=(
+                    validation_metrics.preprocessing_peak_frequency_error_hz
+                ),
+                validation_peak_power_error_db=validation_metrics.peak_power_error_db,
+                validation_preprocessing_peak_power_error_db=(
+                    validation_metrics.preprocessing_peak_power_error_db
+                ),
+                validation_task_monitor=validation_metrics.task_monitor,
+                validation_preprocessing_task_monitor=validation_metrics.preprocessing_task_monitor,
+            )
             epoch_metrics = EpochMetrics(
                 epoch_index=epoch_index,
                 training_loss=training_metrics.total_loss,
@@ -488,23 +529,30 @@ class TorchCodecTrainer:
                 training_task_loss=training_metrics.task_loss,
                 validation_task_loss=validation_metrics.task_loss,
                 validation_task_monitor=validation_metrics.task_monitor,
+                validation_preprocessing_psd_loss=validation_metrics.preprocessing_psd_loss,
+                validation_preprocessing_task_monitor=validation_metrics.preprocessing_task_monitor,
+                validation_peak_frequency_error_hz=validation_metrics.peak_frequency_error_hz,
+                validation_peak_power_error_db=validation_metrics.peak_power_error_db,
+                validation_preprocessing_peak_frequency_error_hz=(
+                    validation_metrics.preprocessing_peak_frequency_error_hz
+                ),
+                validation_preprocessing_peak_power_error_db=(
+                    validation_metrics.preprocessing_peak_power_error_db
+                ),
+                validation_deployment_score=validation_deployment_score,
             )
             history.append(epoch_metrics)
             selection_score = _resolve_epoch_selection_score(
                 epoch_metrics,
                 selection_metric=self.experiment_config.artifacts.selection_metric,
             )
-
-            latest_checkpoint_path = checkpoint_dir / "latest.pt"
-            if self.experiment_config.artifacts.save_latest_checkpoint:
-                self._save_checkpoint(
-                    latest_checkpoint_path,
-                    epoch_metrics=epoch_metrics,
-                    best_selection_score=min(best_selection_score, selection_score),
-                    best_validation_loss=min(best_validation_loss, epoch_metrics.validation_loss),
-                )
-
-            if selection_score < best_selection_score:
+            is_acceptable_candidate = _selection_candidate_is_acceptable(
+                epoch_metrics,
+                require_selection_to_beat_preprocessing=(
+                    self.experiment_config.artifacts.require_selection_to_beat_preprocessing
+                ),
+            )
+            if selection_score < best_selection_score and is_acceptable_candidate:
                 best_selection_score = selection_score
                 best_epoch_index = epoch_index
                 best_validation_loss = epoch_metrics.validation_loss
@@ -517,6 +565,15 @@ class TorchCodecTrainer:
                         best_selection_score=best_selection_score,
                         best_validation_loss=best_validation_loss,
                     )
+
+            latest_checkpoint_path = checkpoint_dir / "latest.pt"
+            if self.experiment_config.artifacts.save_latest_checkpoint:
+                self._save_checkpoint(
+                    latest_checkpoint_path,
+                    epoch_metrics=epoch_metrics,
+                    best_selection_score=best_selection_score,
+                    best_validation_loss=best_validation_loss,
+                )
             if progress_reporter is not None:
                 progress_reporter(
                     EpochProgressUpdate(
@@ -532,6 +589,15 @@ class TorchCodecTrainer:
                     )
                 )
 
+        if best_model_state_dict is None:
+            if self.experiment_config.artifacts.require_selection_to_beat_preprocessing:
+                raise CodecConfigurationError(
+                    "No validation epoch beat the preprocessing-only baseline under "
+                    "the configured deployment-aligned selection guard."
+                )
+            raise CodecConfigurationError(
+                "Training completed without selecting any checkpoint as the best model."
+            )
         if best_model_state_dict is not None:
             self.model.load_state_dict(best_model_state_dict)
         self._export_runtime_assets(runtime_asset_dir)
@@ -616,6 +682,17 @@ class TorchCodecTrainer:
                     reconstructed_frames,
                     name="reconstructed_frames",
                 )
+                preprocessing_only_frames = None
+                if not training:
+                    preprocessing_only_frames = inverse_preprocessor.inverse_preprocess_batch(
+                        tensor_batch.normalized_frames,
+                        tensor_batch.side_means,
+                        tensor_batch.side_log_sigmas,
+                    )
+                    _raise_if_non_finite_tensor(
+                        preprocessing_only_frames,
+                        name="preprocessing_only_frames",
+                    )
                 task_loss_tensor = None
                 if (
                     self.experiment_config.task is not None
@@ -657,12 +734,19 @@ class TorchCodecTrainer:
                     self.optimizer.step()
 
             batch_size = tensor_batch.original_frames.shape[0]
-            task_monitor = self._compute_validation_task_monitor(
+            validation_diagnostics = self._compute_validation_diagnostics(
                 batch,
                 reconstructed_frames.detach().cpu().numpy(),
+                None
+                if preprocessing_only_frames is None
+                else preprocessing_only_frames.detach().cpu().numpy(),
                 dataset_frequency_grid_hz,
             )
-            aggregated.update(breakdown, batch_size=batch_size, task_monitor=task_monitor)
+            aggregated.update(
+                breakdown,
+                batch_size=batch_size,
+                validation_diagnostics=validation_diagnostics,
+            )
 
         return aggregated.finalize()
 
@@ -699,17 +783,63 @@ class TorchCodecTrainer:
             noise_floors=noise_floors,
         )
 
-    def _compute_validation_task_monitor(
+    def _compute_validation_diagnostics(
         self,
         batch: PreparedPsdBatch,
         reconstructed_frames: np.ndarray,
+        preprocessing_only_frames: np.ndarray | None,
         frequency_grid_hz: np.ndarray | None,
-    ) -> float | None:
-        """Compute the exact illustrative task metric for validation monitoring."""
+    ) -> _ValidationDiagnostics | None:
+        """Compute exact deployment-aligned validation metrics for one batch.
+
+        Purpose:
+            Validation must judge the trained codec against the same quantities shown
+            in the deployment notebook, not only against differentiable surrogates.
+            This helper therefore compares the full reconstruction against both the
+            reference frames and the preprocessing-only baseline using exact PSD and
+            raw dominant-peak metrics.
+        """
+        if preprocessing_only_frames is None:
+            return None
+
+        diagnostics = _ValidationDiagnostics(
+            preprocessing_psd_loss=_batch_log_spectral_distortion(
+                batch.original_frames,
+                preprocessing_only_frames,
+                dynamic_range_offset=self.experiment_config.runtime.preprocessing.dynamic_range_offset,
+            ),
+            peak_frequency_error_hz=(
+                None
+                if frequency_grid_hz is None
+                else _batch_peak_frequency_error_hz(
+                    batch.original_frames,
+                    reconstructed_frames,
+                    frequency_grid_hz,
+                )
+            ),
+            peak_power_error_db=_batch_peak_power_error_db(
+                batch.original_frames,
+                reconstructed_frames,
+            ),
+            preprocessing_peak_frequency_error_hz=(
+                None
+                if frequency_grid_hz is None
+                else _batch_peak_frequency_error_hz(
+                    batch.original_frames,
+                    preprocessing_only_frames,
+                    frequency_grid_hz,
+                )
+            ),
+            preprocessing_peak_power_error_db=_batch_peak_power_error_db(
+                batch.original_frames,
+                preprocessing_only_frames,
+            ),
+        )
         if self.experiment_config.task is None:
-            return None
+            return diagnostics
         if batch.noise_floors is None or frequency_grid_hz is None:
-            return None
+            return diagnostics
+
         task_values = [
             illustrative_task_loss(
                 reference_frame=reference_frame,
@@ -725,7 +855,30 @@ class TorchCodecTrainer:
                 strict=True,
             )
         ]
-        return float(np.mean(task_values))
+        preprocessing_task_values = [
+            illustrative_task_loss(
+                reference_frame=reference_frame,
+                reconstructed_frame=preprocessing_frame,
+                noise_floor=noise_floor,
+                frequency_grid_hz=frequency_grid_hz,
+                config=self.experiment_config.task,
+            )
+            for reference_frame, preprocessing_frame, noise_floor in zip(
+                batch.original_frames,
+                preprocessing_only_frames,
+                batch.noise_floors,
+                strict=True,
+            )
+        ]
+        return _ValidationDiagnostics(
+            task_monitor=float(np.mean(task_values)),
+            preprocessing_psd_loss=diagnostics.preprocessing_psd_loss,
+            preprocessing_task_monitor=float(np.mean(preprocessing_task_values)),
+            peak_frequency_error_hz=diagnostics.peak_frequency_error_hz,
+            peak_power_error_db=diagnostics.peak_power_error_db,
+            preprocessing_peak_frequency_error_hz=diagnostics.preprocessing_peak_frequency_error_hz,
+            preprocessing_peak_power_error_db=diagnostics.preprocessing_peak_power_error_db,
+        )
 
     def _save_checkpoint(
         self,
@@ -847,13 +1000,25 @@ class _AggregatedMetrics:
     sample_count: int = 0
     task_monitor_sum: float = 0.0
     task_monitor_count: int = 0
+    preprocessing_psd_loss_sum: float = 0.0
+    preprocessing_psd_loss_count: int = 0
+    preprocessing_task_monitor_sum: float = 0.0
+    preprocessing_task_monitor_count: int = 0
+    peak_frequency_error_hz_sum: float = 0.0
+    peak_frequency_error_hz_count: int = 0
+    peak_power_error_db_sum: float = 0.0
+    peak_power_error_db_count: int = 0
+    preprocessing_peak_frequency_error_hz_sum: float = 0.0
+    preprocessing_peak_frequency_error_hz_count: int = 0
+    preprocessing_peak_power_error_db_sum: float = 0.0
+    preprocessing_peak_power_error_db_count: int = 0
 
     def update(
         self,
         breakdown: TrainingLossBreakdown,
         *,
         batch_size: int,
-        task_monitor: float | None,
+        validation_diagnostics: _ValidationDiagnostics | None,
     ) -> None:
         """Accumulate one batch worth of scalar metrics."""
         self.total_loss_sum += breakdown.total_loss * batch_size
@@ -863,9 +1028,42 @@ class _AggregatedMetrics:
         self.vq_loss_sum += breakdown.vq_loss * batch_size
         self.task_loss_sum += breakdown.task_loss * batch_size
         self.sample_count += batch_size
-        if task_monitor is not None:
-            self.task_monitor_sum += task_monitor * batch_size
+        if validation_diagnostics is None:
+            return
+
+        if validation_diagnostics.task_monitor is not None:
+            self.task_monitor_sum += validation_diagnostics.task_monitor * batch_size
             self.task_monitor_count += batch_size
+        if validation_diagnostics.preprocessing_psd_loss is not None:
+            self.preprocessing_psd_loss_sum += (
+                validation_diagnostics.preprocessing_psd_loss * batch_size
+            )
+            self.preprocessing_psd_loss_count += batch_size
+        if validation_diagnostics.preprocessing_task_monitor is not None:
+            self.preprocessing_task_monitor_sum += (
+                validation_diagnostics.preprocessing_task_monitor * batch_size
+            )
+            self.preprocessing_task_monitor_count += batch_size
+        if validation_diagnostics.peak_frequency_error_hz is not None:
+            self.peak_frequency_error_hz_sum += (
+                validation_diagnostics.peak_frequency_error_hz * batch_size
+            )
+            self.peak_frequency_error_hz_count += batch_size
+        if validation_diagnostics.peak_power_error_db is not None:
+            self.peak_power_error_db_sum += (
+                validation_diagnostics.peak_power_error_db * batch_size
+            )
+            self.peak_power_error_db_count += batch_size
+        if validation_diagnostics.preprocessing_peak_frequency_error_hz is not None:
+            self.preprocessing_peak_frequency_error_hz_sum += (
+                validation_diagnostics.preprocessing_peak_frequency_error_hz * batch_size
+            )
+            self.preprocessing_peak_frequency_error_hz_count += batch_size
+        if validation_diagnostics.preprocessing_peak_power_error_db is not None:
+            self.preprocessing_peak_power_error_db_sum += (
+                validation_diagnostics.preprocessing_peak_power_error_db * batch_size
+            )
+            self.preprocessing_peak_power_error_db_count += batch_size
 
     def finalize(self) -> _FinalizedMetrics:
         """Return averaged scalar metrics for one epoch."""
@@ -882,6 +1080,42 @@ class _AggregatedMetrics:
             vq_loss=self.vq_loss_sum / self.sample_count,
             task_loss=self.task_loss_sum / self.sample_count,
             task_monitor=task_monitor,
+            preprocessing_psd_loss=(
+                None
+                if self.preprocessing_psd_loss_count == 0
+                else self.preprocessing_psd_loss_sum / self.preprocessing_psd_loss_count
+            ),
+            preprocessing_task_monitor=(
+                None
+                if self.preprocessing_task_monitor_count == 0
+                else self.preprocessing_task_monitor_sum / self.preprocessing_task_monitor_count
+            ),
+            peak_frequency_error_hz=(
+                None
+                if self.peak_frequency_error_hz_count == 0
+                else self.peak_frequency_error_hz_sum / self.peak_frequency_error_hz_count
+            ),
+            peak_power_error_db=(
+                None
+                if self.peak_power_error_db_count == 0
+                else self.peak_power_error_db_sum / self.peak_power_error_db_count
+            ),
+            preprocessing_peak_frequency_error_hz=(
+                None
+                if self.preprocessing_peak_frequency_error_hz_count == 0
+                else (
+                    self.preprocessing_peak_frequency_error_hz_sum
+                    / self.preprocessing_peak_frequency_error_hz_count
+                )
+            ),
+            preprocessing_peak_power_error_db=(
+                None
+                if self.preprocessing_peak_power_error_db_count == 0
+                else (
+                    self.preprocessing_peak_power_error_db_sum
+                    / self.preprocessing_peak_power_error_db_count
+                )
+            ),
         )
 
 
@@ -896,6 +1130,140 @@ class _FinalizedMetrics:
     vq_loss: float
     task_loss: float
     task_monitor: float | None = None
+    preprocessing_psd_loss: float | None = None
+    preprocessing_task_monitor: float | None = None
+    peak_frequency_error_hz: float | None = None
+    peak_power_error_db: float | None = None
+    preprocessing_peak_frequency_error_hz: float | None = None
+    preprocessing_peak_power_error_db: float | None = None
+
+
+@dataclass(frozen=True)
+class _ValidationDiagnostics:
+    """Exact validation-only diagnostics aligned with deployment analysis."""
+
+    task_monitor: float | None = None
+    preprocessing_psd_loss: float | None = None
+    preprocessing_task_monitor: float | None = None
+    peak_frequency_error_hz: float | None = None
+    peak_power_error_db: float | None = None
+    preprocessing_peak_frequency_error_hz: float | None = None
+    preprocessing_peak_power_error_db: float | None = None
+
+
+def _batch_log_spectral_distortion(
+    reference_frames: np.ndarray,
+    candidate_frames: np.ndarray,
+    *,
+    dynamic_range_offset: float,
+) -> float:
+    """Return the mean PSD distortion over one NumPy validation batch."""
+    difference = np.log(reference_frames + dynamic_range_offset) - np.log(
+        candidate_frames + dynamic_range_offset
+    )
+    per_frame = np.mean(difference * difference, axis=1)
+    return float(np.mean(per_frame))
+
+
+def _batch_peak_frequency_error_hz(
+    reference_frames: np.ndarray,
+    candidate_frames: np.ndarray,
+    frequency_grid_hz: np.ndarray,
+) -> float:
+    """Return the mean raw dominant-peak location error over one batch."""
+    reference_indices = np.argmax(reference_frames, axis=1)
+    candidate_indices = np.argmax(candidate_frames, axis=1)
+    frequency_grid = np.asarray(frequency_grid_hz, dtype=np.float64)
+    errors = np.abs(frequency_grid[reference_indices] - frequency_grid[candidate_indices])
+    return float(np.mean(errors))
+
+
+def _batch_peak_power_error_db(
+    reference_frames: np.ndarray,
+    candidate_frames: np.ndarray,
+) -> float:
+    """Return the mean dominant-peak amplitude error over one batch."""
+    reference_db = 10.0 * np.log10(np.maximum(np.max(reference_frames, axis=1), 1.0e-12))
+    candidate_db = 10.0 * np.log10(np.maximum(np.max(candidate_frames, axis=1), 1.0e-12))
+    return float(np.mean(np.abs(reference_db - candidate_db)))
+
+
+def _compose_validation_deployment_score(
+    *,
+    validation_psd_loss: float,
+    validation_preprocessing_psd_loss: float | None,
+    validation_peak_frequency_error_hz: float | None,
+    validation_preprocessing_peak_frequency_error_hz: float | None,
+    validation_peak_power_error_db: float | None,
+    validation_preprocessing_peak_power_error_db: float | None,
+    validation_task_monitor: float | None,
+    validation_preprocessing_task_monitor: float | None,
+) -> float | None:
+    """Return a preprocessing-relative deployment score for checkpoint selection.
+
+    A score of `1.0` means parity with the deterministic preprocessing-only baseline.
+    Lower values are better. The components are weighted toward raw dominant-peak
+    localization because that failure mode dominated the deployment notebook results.
+    """
+    weighted_sum = 0.0
+    total_weight = 0.0
+
+    def add_component(
+        *,
+        key: str,
+        candidate_value: float | None,
+        baseline_value: float | None,
+    ) -> None:
+        nonlocal weighted_sum, total_weight
+        if candidate_value is None or baseline_value is None:
+            return
+        stabilizer = _DEPLOYMENT_SELECTION_COMPONENT_STABILIZERS[key]
+        component_weight = _DEPLOYMENT_SELECTION_COMPONENT_WEIGHTS[key]
+        weighted_sum += component_weight * (
+            (candidate_value + stabilizer) / (baseline_value + stabilizer)
+        )
+        total_weight += component_weight
+
+    add_component(
+        key="psd",
+        candidate_value=validation_psd_loss,
+        baseline_value=validation_preprocessing_psd_loss,
+    )
+    add_component(
+        key="peak_frequency",
+        candidate_value=validation_peak_frequency_error_hz,
+        baseline_value=validation_preprocessing_peak_frequency_error_hz,
+    )
+    add_component(
+        key="peak_power",
+        candidate_value=validation_peak_power_error_db,
+        baseline_value=validation_preprocessing_peak_power_error_db,
+    )
+    add_component(
+        key="task",
+        candidate_value=validation_task_monitor,
+        baseline_value=validation_preprocessing_task_monitor,
+    )
+    if total_weight <= 0.0:
+        return None
+    return weighted_sum / total_weight
+
+
+def _selection_candidate_is_acceptable(
+    epoch_metrics: EpochMetrics,
+    *,
+    require_selection_to_beat_preprocessing: bool,
+) -> bool:
+    """Return whether one epoch may become the persisted best checkpoint."""
+    if not require_selection_to_beat_preprocessing:
+        return True
+    deployment_score = epoch_metrics.validation_deployment_score
+    if deployment_score is None:
+        raise CodecConfigurationError(
+            "require_selection_to_beat_preprocessing needs validation_deployment_score, "
+            "but the configured experiment does not produce it."
+        )
+    return deployment_score < 1.0
 
 
 def _coerce_mapping(value: object) -> dict[str, Any]:
