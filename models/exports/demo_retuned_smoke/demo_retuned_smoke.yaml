@@ -1,0 +1,80 @@
+dataset:
+  dataset_path: data/raw/campaigns
+  source_format: campaigns
+  frames_key: frames
+  frequency_grid_key: frequency_grid_hz
+  noise_floor_key: null
+  noise_floor_window: 32
+  noise_floor_percentile: 10.0
+  validation_fraction: 0.2
+  shuffle: true
+  seed: 0
+  campaign_include_globs:
+  - '*'
+  campaign_exclude_globs: []
+  campaign_node_globs:
+  - Node*.csv
+  campaign_target_bin_count: 4096
+  campaign_value_scale: db_to_power
+  campaign_max_frames: 32
+runtime:
+  preprocessing:
+    reduced_bin_count: 512
+    resolution_factor: null
+    dynamic_range_offset: 1.0e-06
+    block_count: 16
+    stability_epsilon: 1.0e-06
+    mean_quantizer:
+      minimum: -20.0
+      maximum: 40.0
+      bits: 12
+    log_sigma_quantizer:
+      minimum: -12.0
+      maximum: 8.0
+      bits: 10
+  entropy_model:
+    alphabet_size: 256
+    precision_bits: 12
+    pseudo_count: 1.0
+  packet_format:
+    magic: PSDC
+    version: 1
+model:
+  reduced_bin_count: 512
+  latent_vector_count: 128
+  embedding_dim: 8
+  codebook_size: 256
+  hidden_dim: 768
+  commitment_weight: 0.25
+training:
+  epoch_count: 2
+  batch_size: 8
+  learning_rate: 0.0003
+  weight_decay: 1.0e-05
+  gradient_clip_norm: 1.0
+  device: auto
+  loss:
+    psd_weight: 2.0
+    rate_weight: 0.0003
+    vq_weight: 1.0
+    task_weight: 0.05
+artifacts:
+  experiment_name: demo_retuned_smoke
+  checkpoint_root: models/checkpoints
+  export_root: models/exports
+  export_onnx: false
+  save_latest_checkpoint: true
+  save_best_checkpoint: true
+  selection_metric: validation_task_monitor
+task:
+  occupancy_margin: 5.0e-06
+  occupancy_temperature: 2.5e-06
+  occupancy_positive_weight: 2.0
+  occupancy_negative_weight: 1.0
+  smoothing_window_bins: 5
+  huber_delta: 100000.0
+  peak_weight: 7.5e-13
+  centroid_weight: 3.0e-12
+  bandwidth_weight: 7.5e-10
+  occupancy_weight: 1.0
+  feature_weight: 1.0

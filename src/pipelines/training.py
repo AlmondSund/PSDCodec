@@ -51,6 +51,15 @@ if TYPE_CHECKING:
 else:
     Tensor = Any
 
+_SELECTION_METRICS: frozenset[str] = frozenset(
+    {
+        "validation_loss",
+        "validation_psd_loss",
+        "validation_task_loss",
+        "validation_task_monitor",
+    }
+)
+
 
 def _require_torch() -> Any:
     """Return the imported torch module or raise a precise error."""
@@ -164,6 +173,15 @@ class ArtifactConfig:
     export_onnx: bool = True  # Whether to export the encoder boundary to ONNX after training
     save_latest_checkpoint: bool = True  # Whether to persist the latest checkpoint every epoch
     save_best_checkpoint: bool = True  # Whether to persist the best validation checkpoint
+    selection_metric: str = "validation_loss"  # Metric used to pick the best checkpoint
+
+    def __post_init__(self) -> None:
+        """Validate artifact and checkpoint-selection settings."""
+        if self.selection_metric not in _SELECTION_METRICS:
+            raise CodecConfigurationError(
+                "selection_metric must be one of "
+                f"{sorted(_SELECTION_METRICS)}.",
+            )
 
 
 @dataclass(frozen=True)
@@ -268,6 +286,8 @@ class TrainingSummary:
 
     history: tuple[EpochMetrics, ...]
     best_epoch_index: int
+    selection_metric: str
+    best_selection_score: float
     best_validation_loss: float
     best_checkpoint_path: Path | None
     latest_checkpoint_path: Path | None
@@ -284,6 +304,8 @@ class EpochProgressUpdate:
     completed_epoch_count: int  # Number of epochs completed so far
     total_epoch_count: int  # Total epochs requested by the experiment
     remaining_epoch_count: int  # Epochs still pending after this update
+    selection_metric: str  # Metric used to choose the best checkpoint
+    best_selection_score: float  # Best score seen so far for the selected metric
     best_validation_loss: float  # Best validation loss observed so far
 
 
@@ -292,6 +314,8 @@ class LoadedTrainingCheckpoint:
     """Typed view over a persisted training checkpoint."""
 
     epoch_index: int
+    selection_metric: str
+    best_selection_score: float
     best_validation_loss: float
     experiment_config: TrainingExperimentConfig
     metrics: EpochMetrics
@@ -427,6 +451,7 @@ class TorchCodecTrainer:
 
         history: list[EpochMetrics] = []
         best_validation_loss = float("inf")
+        best_selection_score = float("inf")
         best_epoch_index = -1
         best_checkpoint_path: Path | None = None
         latest_checkpoint_path: Path | None = None
@@ -464,24 +489,31 @@ class TorchCodecTrainer:
                 validation_task_monitor=validation_metrics.task_monitor,
             )
             history.append(epoch_metrics)
+            selection_score = _resolve_epoch_selection_score(
+                epoch_metrics,
+                selection_metric=self.experiment_config.artifacts.selection_metric,
+            )
 
             latest_checkpoint_path = checkpoint_dir / "latest.pt"
             if self.experiment_config.artifacts.save_latest_checkpoint:
                 self._save_checkpoint(
                     latest_checkpoint_path,
                     epoch_metrics=epoch_metrics,
+                    best_selection_score=min(best_selection_score, selection_score),
                     best_validation_loss=min(best_validation_loss, epoch_metrics.validation_loss),
                 )
 
-            if epoch_metrics.validation_loss < best_validation_loss:
-                best_validation_loss = epoch_metrics.validation_loss
+            if selection_score < best_selection_score:
+                best_selection_score = selection_score
                 best_epoch_index = epoch_index
+                best_validation_loss = epoch_metrics.validation_loss
                 best_model_state_dict = copy.deepcopy(self.model.state_dict())
                 if self.experiment_config.artifacts.save_best_checkpoint:
                     best_checkpoint_path = checkpoint_dir / "best.pt"
                     self._save_checkpoint(
                         best_checkpoint_path,
                         epoch_metrics=epoch_metrics,
+                        best_selection_score=best_selection_score,
                         best_validation_loss=best_validation_loss,
                     )
             if progress_reporter is not None:
@@ -493,6 +525,8 @@ class TorchCodecTrainer:
                         remaining_epoch_count=(
                             self.experiment_config.training.epoch_count - epoch_index - 1
                         ),
+                        selection_metric=self.experiment_config.artifacts.selection_metric,
+                        best_selection_score=best_selection_score,
                         best_validation_loss=best_validation_loss,
                     )
                 )
@@ -510,7 +544,9 @@ class TorchCodecTrainer:
             json.dumps(
                 {
                     "experiment_config": self.experiment_config.to_dict(),
+                    "selection_metric": self.experiment_config.artifacts.selection_metric,
                     "best_epoch_index": best_epoch_index,
+                    "best_selection_score": best_selection_score,
                     "best_validation_loss": best_validation_loss,
                     "history": [asdict(epoch) for epoch in history],
                     "best_checkpoint_path": None
@@ -529,6 +565,8 @@ class TorchCodecTrainer:
         return TrainingSummary(
             history=tuple(history),
             best_epoch_index=best_epoch_index,
+            selection_metric=self.experiment_config.artifacts.selection_metric,
+            best_selection_score=best_selection_score,
             best_validation_loss=best_validation_loss,
             best_checkpoint_path=best_checkpoint_path,
             latest_checkpoint_path=latest_checkpoint_path,
@@ -691,6 +729,7 @@ class TorchCodecTrainer:
         checkpoint_path: Path,
         *,
         epoch_metrics: EpochMetrics,
+        best_selection_score: float,
         best_validation_loss: float,
     ) -> None:
         """Persist the current model, optimizer, and configuration state."""
@@ -699,6 +738,8 @@ class TorchCodecTrainer:
         torch_module.save(
             {
                 "epoch_index": epoch_metrics.epoch_index,
+                "selection_metric": self.experiment_config.artifacts.selection_metric,
+                "best_selection_score": best_selection_score,
                 "best_validation_loss": best_validation_loss,
                 "experiment_config": self.experiment_config.to_dict(),
                 "metrics": asdict(epoch_metrics),
@@ -736,6 +777,10 @@ def load_training_checkpoint(
     metrics = EpochMetrics(**payload["metrics"])
     return LoadedTrainingCheckpoint(
         epoch_index=int(payload["epoch_index"]),
+        selection_metric=str(payload.get("selection_metric", "validation_loss")),
+        best_selection_score=float(
+            payload.get("best_selection_score", payload["best_validation_loss"])
+        ),
         best_validation_loss=float(payload["best_validation_loss"]),
         experiment_config=experiment_config,
         metrics=metrics,
@@ -759,6 +804,20 @@ def run_training_experiment(
         source_config_path=source_config_path,
         progress_reporter=progress_reporter,
     )
+
+
+def _resolve_epoch_selection_score(
+    epoch_metrics: EpochMetrics,
+    *,
+    selection_metric: str,
+) -> float:
+    """Return the scalar metric used to pick the best checkpoint for one epoch."""
+    selected_value = getattr(epoch_metrics, selection_metric)
+    if selected_value is None:
+        raise CodecConfigurationError(
+            f"selection_metric '{selection_metric}' is unavailable for this experiment.",
+        )
+    return float(selected_value)
 
 
 @dataclass(frozen=True)

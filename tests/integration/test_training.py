@@ -281,6 +281,8 @@ def test_training_reports_epoch_progress_updates(tmp_path: Path) -> None:
     )
 
     assert len(updates) == experiment_config.training.epoch_count
+    assert updates[-1].selection_metric == experiment_config.artifacts.selection_metric
     assert updates[-1].remaining_epoch_count == 0
     assert updates[-1].completed_epoch_count == experiment_config.training.epoch_count
+    assert updates[-1].best_selection_score == pytest.approx(summary.best_selection_score)
     assert updates[-1].best_validation_loss == pytest.approx(summary.best_validation_loss)

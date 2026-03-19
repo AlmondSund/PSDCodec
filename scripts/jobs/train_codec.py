@@ -22,7 +22,8 @@ def _print_epoch_progress(progress_update: object) -> None:
             f"remaining_epochs={progress_update.remaining_epoch_count} | "
             f"train_loss={metrics.training_loss:.6f} | "
             f"val_loss={metrics.validation_loss:.6f} | "
-            f"best_val={progress_update.best_validation_loss:.6f}"
+            f"best_{progress_update.selection_metric}="
+            f"{progress_update.best_selection_score:.6f}"
         ),
         flush=True,
     )
@@ -56,6 +57,8 @@ def main() -> int:
         source_config_path=args.config,
         progress_reporter=_print_epoch_progress,
     )
+    print(f"selection_metric: {summary.selection_metric}")
+    print(f"best_selection_score: {summary.best_selection_score:.6f}")
     print(f"best_epoch_index: {summary.best_epoch_index}")
     print(f"best_validation_loss: {summary.best_validation_loss:.6f}")
     print(f"best_checkpoint_path: {summary.best_checkpoint_path}")
