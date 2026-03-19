@@ -57,6 +57,7 @@ def main() -> int:
         source_config_path=args.config,
         progress_reporter=_print_epoch_progress,
     )
+    print(f"resolved_training_device: {summary.resolved_training_device}")
     print(f"selection_metric: {summary.selection_metric}")
     print(f"best_selection_score: {summary.best_selection_score:.6f}")
     print(f"best_epoch_index: {summary.best_epoch_index}")

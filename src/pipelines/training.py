@@ -144,7 +144,7 @@ class TrainingConfig:
     learning_rate: float = 1.0e-3  # Adam learning rate
     weight_decay: float = 0.0  # Adam weight decay
     gradient_clip_norm: float | None = 1.0  # Optional global gradient clipping threshold
-    device: str = "cpu"  # Torch device string or `auto`
+    device: str = "auto"  # Torch device string or `auto`
     loss: RateDistortionLossConfig = RateDistortionLossConfig()  # Lagrangian loss weights
 
     def __post_init__(self) -> None:
@@ -289,6 +289,7 @@ class TrainingSummary:
     selection_metric: str
     best_selection_score: float
     best_validation_loss: float
+    resolved_training_device: str
     best_checkpoint_path: Path | None
     latest_checkpoint_path: Path | None
     export_dir: Path
@@ -544,6 +545,7 @@ class TorchCodecTrainer:
             json.dumps(
                 {
                     "experiment_config": self.experiment_config.to_dict(),
+                    "resolved_training_device": self.training_device,
                     "selection_metric": self.experiment_config.artifacts.selection_metric,
                     "best_epoch_index": best_epoch_index,
                     "best_selection_score": best_selection_score,
@@ -568,6 +570,7 @@ class TorchCodecTrainer:
             selection_metric=self.experiment_config.artifacts.selection_metric,
             best_selection_score=best_selection_score,
             best_validation_loss=best_validation_loss,
+            resolved_training_device=self.training_device,
             best_checkpoint_path=best_checkpoint_path,
             latest_checkpoint_path=latest_checkpoint_path,
             export_dir=export_dir,
@@ -905,16 +908,65 @@ def _coerce_mapping(value: object) -> dict[str, Any]:
 def _resolve_training_device_string(
     configured_device: str,  # Requested device string from the experiment config
 ) -> str:
-    """Resolve `auto` device selection to a concrete torch device string."""
+    """Resolve the effective training device and verify that it is usable.
+
+    Purpose:
+        Make device selection self-contained and robust. `auto` should prefer the
+        first actually usable accelerator, not merely one that reports itself as
+        nominally available. Explicit device requests are also validated eagerly so
+        training fails fast with a precise configuration error instead of a later
+        runtime/backend exception.
+    """
+    normalized_device = configured_device.strip()
+    if normalized_device == "auto":
+        for candidate_device in ("cuda", "mps", "cpu"):
+            if _can_use_training_device(candidate_device):
+                return candidate_device
+        raise CodecConfigurationError(
+            "Unable to resolve a usable training device from the auto candidates.",
+        )
+    if not _can_use_training_device(normalized_device):
+        raise CodecConfigurationError(
+            f"Requested training device '{normalized_device}' is not usable on this system.",
+        )
+    return normalized_device
+
+
+def _can_use_training_device(
+    device_name: str,  # Candidate torch device string such as `cuda` or `cpu`
+) -> bool:
+    """Return whether the requested training device is genuinely usable.
+
+    The check is intentionally stronger than an availability flag: it validates the
+    backend-specific capability signal and then performs a tiny allocation/probe on
+    the target device so the trainer can rely on the returned device string.
+    """
     torch_module = _require_torch()
-    if configured_device != "auto":
-        return configured_device
-    if torch_module.cuda.is_available():
-        return "cuda"
-    mps_backend = getattr(torch_module.backends, "mps", None)
-    if mps_backend is not None and bool(mps_backend.is_available()):
-        return "mps"
-    return "cpu"
+    try:
+        device = torch_module.device(device_name)
+    except (RuntimeError, TypeError, ValueError):
+        return False
+
+    if device.type == "cpu":
+        return True
+    if device.type == "cuda":
+        if not torch_module.cuda.is_available():
+            return False
+        if device.index is not None and device.index >= torch_module.cuda.device_count():
+            return False
+    elif device.type == "mps":
+        mps_backend = getattr(torch_module.backends, "mps", None)
+        if mps_backend is None or not bool(mps_backend.is_available()):
+            return False
+
+    try:
+        probe = torch_module.zeros(1, dtype=torch_module.float32, device=device)
+        _ = probe + 1.0
+        if device.type == "cuda":
+            torch_module.cuda.synchronize(device)
+    except Exception:
+        return False
+    return True
 
 
 def _expect_mapping(payload: dict[str, Any], key: str) -> dict[str, Any]:

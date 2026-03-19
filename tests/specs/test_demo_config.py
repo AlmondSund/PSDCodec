@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pipelines.training import TrainingExperimentConfig
+from pipelines.training import TrainingConfig, TrainingExperimentConfig
 
 
 def test_demo_yaml_points_to_the_canonical_manuscript_run() -> None:
@@ -28,3 +28,8 @@ def test_repo_keeps_one_single_demo_notebook() -> None:
     notebook_names = sorted(path.name for path in Path("notebooks").glob("*.ipynb"))
 
     assert notebook_names == ["demo_deploy.ipynb"]
+
+
+def test_training_config_defaults_to_auto_device_selection() -> None:
+    """Training should auto-select the best usable device unless overridden explicitly."""
+    assert TrainingConfig().device == "auto"

@@ -211,6 +211,7 @@ def test_training_smoke_saves_checkpoint_and_runtime_assets(tmp_path: Path) -> N
     training_dataset, validation_dataset = trainer.load_prepared_datasets()
     summary = trainer.fit(training_dataset, validation_dataset)
 
+    assert summary.resolved_training_device in {"cpu", "cuda", "mps"}
     assert summary.best_checkpoint_path is not None
     assert summary.best_checkpoint_path.exists()
     assert summary.latest_checkpoint_path is not None
