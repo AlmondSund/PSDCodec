@@ -194,3 +194,36 @@ def test_torch_illustrative_task_loss_penalizes_feature_mismatch() -> None:
     )
 
     assert float(loss_bad.detach().cpu().item()) > float(loss_good.detach().cpu().item())
+
+
+def test_torch_illustrative_task_loss_has_finite_gradients_for_narrow_peaks() -> None:
+    """A zero-bandwidth peak should not make the training surrogate emit NaN gradients."""
+    torch = pytest.importorskip("torch")
+    config = IllustrativeTaskConfig(
+        occupancy_margin=5.0e-6,
+        occupancy_temperature=2.5e-6,
+        smoothing_window_bins=5,
+        huber_delta=100000.0,
+        peak_weight=7.5e-13,
+        centroid_weight=3.0e-12,
+        bandwidth_weight=7.5e-10,
+        occupancy_weight=1.0,
+        feature_weight=1.0,
+    )
+    reference = torch.zeros((1, 4096), dtype=torch.float32)
+    reference[0, 1000] = 0.2
+    reconstructed = reference.clone().requires_grad_(True)
+    noise_floors = torch.zeros_like(reference)
+    frequency_grid_hz = torch.linspace(88.0e6, 108.0e6, steps=4096, dtype=torch.float32)
+
+    loss = torch_illustrative_task_loss(
+        reference,
+        reconstructed,
+        noise_floors=noise_floors,
+        frequency_grid_hz=frequency_grid_hz,
+        config=config,
+    )
+    loss.backward()
+
+    assert reconstructed.grad is not None
+    assert bool(torch.isfinite(reconstructed.grad).all().item())

@@ -275,6 +275,7 @@ def _torch_extract_illustrative_features(
     """Extract differentiable illustrative features from one batched PSD tensor."""
     torch_module = _require_torch()
     frequency_grid = frequency_grid_hz.unsqueeze(0)
+    bandwidth_stabilizer_hz = _torch_frequency_grid_step_hz(frequency_grid_hz)
 
     # The manuscript peak uses a hard argmax after smoothing. Training replaces it
     # with a normalized soft-argmax so gradients still encourage dominant-peak
@@ -313,8 +314,17 @@ def _torch_extract_illustrative_features(
         occupied_weights * (frequency_grid - occupied_center_hz.unsqueeze(1)) ** 2,
         dim=1,
     ) / safe_occupied_mass
+    # A plain `sqrt(12 * variance)` has an infinite derivative at zero variance,
+    # which makes perfectly narrow single-bin occupancies produce NaN gradients.
+    # The shifted square root preserves the zero-bandwidth fixed point while making
+    # the local gradient finite and scaled to the dataset frequency resolution.
     occupied_bandwidth_hz = torch_module.sqrt(
         torch_module.clamp(12.0 * occupied_variance_hz2, min=0.0)
+        + bandwidth_stabilizer_hz * bandwidth_stabilizer_hz,
+    ) - bandwidth_stabilizer_hz
+    occupied_bandwidth_hz = torch_module.clamp(
+        occupied_bandwidth_hz,
+        min=0.0,
     )
     occupied_bandwidth_hz = torch_module.where(
         occupied_mass > 1.0e-12,
@@ -374,6 +384,29 @@ def _torch_huber(
             0.5 * magnitudes * magnitudes,
             delta * (magnitudes - 0.5 * delta),
         ),
+    )
+
+
+def _torch_frequency_grid_step_hz(
+    frequency_grid_hz: Tensor,
+) -> Tensor:
+    """Return a stable positive frequency step used to regularize the bandwidth surrogate."""
+    torch_module = _require_torch()
+    if frequency_grid_hz.ndim != 1:
+        raise CodecConfigurationError("frequency_grid_hz must be one-dimensional.")
+    if frequency_grid_hz.shape[0] <= 1:
+        return cast(
+            Tensor,
+            torch_module.tensor(
+                1.0,
+                dtype=frequency_grid_hz.dtype,
+                device=frequency_grid_hz.device,
+            ),
+        )
+    steps_hz = torch_module.abs(frequency_grid_hz[1:] - frequency_grid_hz[:-1])
+    return cast(
+        Tensor,
+        torch_module.clamp(torch_module.mean(steps_hz), min=1.0),
     )
 
 
