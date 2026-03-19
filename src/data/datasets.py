@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 
@@ -83,19 +84,25 @@ class PreparedPsdDataset:
 
         artifacts = [preprocessor.preprocess(frame) for frame in frame_matrix]
         return cls(
-            original_frames=frame_matrix,
-            normalized_frames=np.stack(
-                [artifact.normalized_frame for artifact in artifacts], axis=0
+            # Training consumes float32 tensors, so storing prepared arrays in float32
+            # avoids re-casting the whole resident dataset on every batch transfer.
+            original_frames=_as_training_array(frame_matrix),
+            normalized_frames=_as_training_array(
+                np.stack([artifact.normalized_frame for artifact in artifacts], axis=0)
             ),
-            side_means=np.stack(
-                [artifact.side_information.means for artifact in artifacts], axis=0
+            side_means=_as_training_array(
+                np.stack([artifact.side_information.means for artifact in artifacts], axis=0)
             ),
-            side_log_sigmas=np.stack(
-                [artifact.side_information.log_sigmas for artifact in artifacts],
-                axis=0,
+            side_log_sigmas=_as_training_array(
+                np.stack(
+                    [artifact.side_information.log_sigmas for artifact in artifacts],
+                    axis=0,
+                )
             ),
             frequency_grid_hz=frequency_grid,
-            noise_floors=resolved_noise_floors,
+            noise_floors=(
+                None if resolved_noise_floors is None else _as_training_array(resolved_noise_floors)
+            ),
         )
 
     @classmethod
@@ -103,16 +110,44 @@ class PreparedPsdDataset:
         cls,
         dataset_path: str | Path,  # Input `.npz` file containing PSD arrays
         *,
-        preprocessor: FramePreprocessor,
+        preprocessor: FramePreprocessor | None,
         frames_key: str = "frames",
         frequency_grid_key: str | None = "frequency_grid_hz",
         noise_floor_key: str | None = None,
         noise_floor_window: int | None = None,
         noise_floor_percentile: float = 10.0,
     ) -> PreparedPsdDataset:
-        """Load a prepared PSD dataset from an `.npz` archive."""
+        """Load a prepared PSD dataset from an `.npz` archive.
+
+        Purpose:
+            Support both raw harmonized archives (`frames` plus optional metadata) and
+            fully prepared caches (`original_frames`, `normalized_frames`, and side
+            information). The latter avoids repeating deterministic preprocessing on
+            every training run.
+        """
         path = Path(dataset_path)
         with np.load(path, allow_pickle=False) as data:
+            if _npz_contains_prepared_dataset(data):
+                return cls(
+                    original_frames=_as_training_array(data["original_frames"]),
+                    normalized_frames=_as_training_array(data["normalized_frames"]),
+                    side_means=_as_training_array(data["side_means"]),
+                    side_log_sigmas=_as_training_array(data["side_log_sigmas"]),
+                    frequency_grid_hz=(
+                        None
+                        if "frequency_grid_hz" not in data
+                        else np.asarray(data["frequency_grid_hz"], dtype=np.float64)
+                    ),
+                    noise_floors=(
+                        None
+                        if "noise_floors" not in data
+                        else _as_training_array(data["noise_floors"])
+                    ),
+                )
+            if preprocessor is None:
+                raise ValueError(
+                    "preprocessor is required when loading a raw PSD dataset archive."
+                )
             frames = data[frames_key]
             frequency_grid = (
                 data[frequency_grid_key]
@@ -130,6 +165,32 @@ class PreparedPsdDataset:
             noise_floor_window=noise_floor_window,
             noise_floor_percentile=noise_floor_percentile,
         )
+
+    def save_npz(
+        self,
+        output_path: str | Path,  # Destination `.npz` archive for this prepared dataset
+    ) -> Path:
+        """Persist this fully prepared dataset for fast subsequent training runs.
+
+        Side effects:
+            Writes a compressed `.npz` archive to disk. The saved arrays are already in
+            training-ready `float32` precision so the resident memory footprint stays
+            aligned with the actual torch execution dtype.
+        """
+        target_path = Path(output_path)
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        payload: dict[str, np.ndarray] = {
+            "original_frames": self.original_frames,
+            "normalized_frames": self.normalized_frames,
+            "side_means": self.side_means,
+            "side_log_sigmas": self.side_log_sigmas,
+        }
+        if self.frequency_grid_hz is not None:
+            payload["frequency_grid_hz"] = np.asarray(self.frequency_grid_hz, dtype=np.float64)
+        if self.noise_floors is not None:
+            payload["noise_floors"] = self.noise_floors
+        np.savez_compressed(target_path, **cast(Any, payload))
+        return target_path
 
     @classmethod
     def from_campaigns(
@@ -284,6 +345,22 @@ def preprocess_artifacts_to_sample(
         side_log_sigmas=artifacts.side_information.log_sigmas,
         noise_floor=noise_floor,
     )
+
+
+def _as_training_array(values: np.ndarray) -> np.ndarray:
+    """Return a contiguous float32 array for training-resident dataset storage."""
+    return np.asarray(values, dtype=np.float32, order="C")
+
+
+def _npz_contains_prepared_dataset(data: np.lib.npyio.NpzFile) -> bool:
+    """Return whether an `.npz` archive already stores prepared training arrays."""
+    required_keys = {
+        "original_frames",
+        "normalized_frames",
+        "side_means",
+        "side_log_sigmas",
+    }
+    return required_keys.issubset(set(data.files))
 
 
 def _resolve_noise_floors(

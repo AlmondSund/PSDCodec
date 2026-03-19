@@ -21,14 +21,14 @@ dataset:
 runtime:
   preprocessing:
     # The manuscript's example task depends on narrow-peak occupancy and feature
-    # preservation, so the downsampling is intentionally less aggressive than before.
-    # The deployment analysis showed that the learned stage was usually damaging the
-    # preprocessing-only baseline, so the canonical demo now preserves twice as many
-    # reduced-domain bins before the learned compression stage.
-    reduced_bin_count: 512
+    # preservation, so the downsampling is intentionally conservative. The previous
+    # 512-bin run was still worse than the preprocessing-only baseline on deployment,
+    # so the canonical demo now keeps a 1024-bin reduced representation before the
+    # learned compression stage.
+    reduced_bin_count: 1024
     resolution_factor:
     dynamic_range_offset: 1.0e-6
-    block_count: 16
+    block_count: 32
     stability_epsilon: 1.0e-6
     mean_quantizer:
       minimum: -20.0
@@ -39,7 +39,7 @@ runtime:
       maximum: 8.0
       bits: 10
   entropy_model:
-    alphabet_size: 256
+    alphabet_size: 512
     precision_bits: 12
     pseudo_count: 1.0
   packet_format:
@@ -47,28 +47,29 @@ runtime:
     version: 1
 
 model:
-  reduced_bin_count: 512
-  latent_vector_count: 128
+  reduced_bin_count: 1024
+  latent_vector_count: 256
   embedding_dim: 8
-  codebook_size: 256
-  hidden_dim: 768
+  codebook_size: 512
+  hidden_dim: 1024
   commitment_weight: 0.25
 
 training:
-  # This canonical demo run now prioritizes deployment fidelity over aggressive
-  # compression. The previous 256-bin preprocessing was too destructive for narrow
-  # spectral peaks once the learned stage was applied.
+  # This canonical demo run prioritizes deployment fidelity over aggressive
+  # compression. The deployment notebook showed that the learned stage was still
+  # losing narrow peaks, so the bitrate penalty is relaxed and the task term is
+  # made stronger than in the previous quality-first attempt.
   epoch_count: 100
-  batch_size: 16
-  learning_rate: 3.0e-4
+  batch_size: 8
+  learning_rate: 2.0e-4
   weight_decay: 1.0e-5
   gradient_clip_norm: 1.0
   device: auto
   loss:
-    psd_weight: 2.0
-    rate_weight: 3.0e-4
+    psd_weight: 3.0
+    rate_weight: 1.0e-4
     vq_weight: 1.0
-    task_weight: 0.05
+    task_weight: 0.15
 
 artifacts:
   experiment_name: demo
@@ -77,24 +78,28 @@ artifacts:
   export_onnx: true
   save_latest_checkpoint: true
   save_best_checkpoint: true
-  # The deployment analysis showed that the surrogate-weighted validation loss kept
-  # improving after the exact illustrative task monitor had already degraded, so the
-  # demo checkpoint must now be selected by the exact task monitor instead.
-  selection_metric: validation_task_monitor
+  # The deployment analysis showed that even the exact illustrative task monitor was
+  # not sufficient by itself: the exported model could still lose the raw dominant
+  # peak while appearing acceptable on the smoothed task features. The demo model is
+  # therefore selected by a deployment-aligned score relative to preprocessing-only,
+  # and bad checkpoints are rejected instead of being exported.
+  selection_metric: validation_deployment_score
+  require_selection_to_beat_preprocessing: true
 
 task:
   # Manuscript example: occupancy consistency + feature preservation.
   # These values are in linear-power units, derived from observed campaign frame and
-  # noise-floor deltas rather than from dB magnitudes. The feature penalties operate
-  # on raw Hz features, so their weights explicitly normalize the frequency scales.
+  # noise-floor deltas rather than from dB magnitudes. The feature balance now
+  # explicitly favors dominant-peak preservation over occupied-bandwidth smoothness,
+  # because deployment quality was failing mainly through peak swapping.
   occupancy_margin: 5.0e-6
   occupancy_temperature: 2.5e-6
   occupancy_positive_weight: 2.0
   occupancy_negative_weight: 1.0
   smoothing_window_bins: 5
   huber_delta: 100000.0
-  peak_weight: 7.5e-13
-  centroid_weight: 3.0e-12
-  bandwidth_weight: 7.5e-10
-  occupancy_weight: 1.0
-  feature_weight: 1.0
+  peak_weight: 5.0e-12
+  centroid_weight: 1.0e-12
+  bandwidth_weight: 1.5e-10
+  occupancy_weight: 0.5
+  feature_weight: 2.0

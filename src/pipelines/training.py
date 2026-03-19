@@ -77,6 +77,8 @@ _DEPLOYMENT_SELECTION_COMPONENT_STABILIZERS: dict[str, float] = {
     "task": 0.25,
 }
 
+_ACCELERATOR_DEVICE_TYPES: frozenset[str] = frozenset({"cuda", "mps"})
+
 
 def _require_torch() -> Any:
     """Return the imported torch module or raise a precise error."""
@@ -960,6 +962,28 @@ def run_training_experiment(
         source_config_path=source_config_path,
         progress_reporter=progress_reporter,
     )
+
+
+def resolve_accelerator_training_device_string(
+    configured_device: str,  # Requested device string from the experiment config
+) -> str:
+    """Resolve a training device and require it to be a real accelerator.
+
+    Purpose:
+        Some entrypoints, such as the canonical demo-training CLI, should fail fast
+        when `auto` would otherwise fall back to CPU. This helper keeps that policy
+        explicit at the orchestration boundary while reusing the trainer's validated
+        device-resolution logic.
+    """
+    resolved_device = _resolve_training_device_string(configured_device)
+    resolved_device_type = _require_torch().device(resolved_device).type
+    if resolved_device_type not in _ACCELERATOR_DEVICE_TYPES:
+        raise CodecConfigurationError(
+            "This training run requires an accelerator, but the resolved device is "
+            f"'{resolved_device}'. Configure a usable CUDA or MPS device, or opt out "
+            "of the accelerator requirement explicitly.",
+        )
+    return resolved_device
 
 
 def _resolve_epoch_selection_score(

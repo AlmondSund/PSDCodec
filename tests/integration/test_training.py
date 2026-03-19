@@ -15,6 +15,7 @@ from codec.config import (
     PreprocessingConfig,
     ScalarQuantizerConfig,
 )
+from codec.exceptions import CodecConfigurationError
 from models.torch_backend import TorchCodecConfig
 from objectives.distortion import IllustrativeTaskConfig
 from objectives.training import RateDistortionLossConfig
@@ -29,6 +30,7 @@ from pipelines.training import (
     _compose_validation_deployment_score,
     _selection_candidate_is_acceptable,
     load_training_checkpoint,
+    resolve_accelerator_training_device_string,
 )
 
 torch = pytest.importorskip("torch")
@@ -290,6 +292,31 @@ def test_training_reports_epoch_progress_updates(tmp_path: Path) -> None:
     assert updates[-1].completed_epoch_count == experiment_config.training.epoch_count
     assert updates[-1].best_selection_score == pytest.approx(summary.best_selection_score)
     assert updates[-1].best_validation_loss == pytest.approx(summary.best_validation_loss)
+
+
+def test_resolve_accelerator_training_device_rejects_cpu_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Accelerator-only entrypoints should reject CPU fallback explicitly."""
+    monkeypatch.setattr(
+        "pipelines.training._resolve_training_device_string",
+        lambda configured_device: "cpu",
+    )
+
+    with pytest.raises(CodecConfigurationError, match="requires an accelerator"):
+        resolve_accelerator_training_device_string("auto")
+
+
+def test_resolve_accelerator_training_device_accepts_cuda(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Accelerator-only entrypoints should preserve usable GPU devices."""
+    monkeypatch.setattr(
+        "pipelines.training._resolve_training_device_string",
+        lambda configured_device: "cuda",
+    )
+
+    assert resolve_accelerator_training_device_string("auto") == "cuda"
 
 
 def test_deployment_score_reports_preprocessing_relative_parity() -> None:

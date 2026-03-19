@@ -1,0 +1,15 @@
+numpy>=2.0
+PyYAML>=6.0
+
+[dev]
+pytest>=8.0
+ruff>=0.6
+mypy>=1.11
+
+[onnx]
+onnx>=1.18
+onnxruntime>=1.20
+onnxscript>=0.2
+
+[torch]
+torch>=2.6
