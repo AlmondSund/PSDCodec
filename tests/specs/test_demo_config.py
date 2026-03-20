@@ -37,6 +37,10 @@ def test_demo_yaml_points_to_the_canonical_manuscript_run() -> None:
     assert config.model.latent_vector_count == 256
     assert config.model.codebook_size == 512
     assert config.training.device == "auto"
+    assert config.training.batch_size == 64
+    assert config.training.mixed_precision == "auto"
+    assert config.training.enable_model_compile
+    assert config.artifacts.latest_checkpoint_interval == 10
     assert config.task is not None
 
 

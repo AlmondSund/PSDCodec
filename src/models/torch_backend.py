@@ -130,9 +130,17 @@ if torch is not None:
             """Quantize latents and compute the stabilization loss."""
             batch_size, latent_vector_count, embedding_dim = latents.shape
             flat_latents = latents.reshape(-1, embedding_dim)
-            distances = torch.sum(
-                (flat_latents[:, None, :] - self.codebook[None, :, :]) ** 2,
-                dim=2,
+
+            # Compute squared Euclidean distances with the GEMM identity
+            # ||a - b||^2 = ||a||^2 + ||b||^2 - 2 a·b. This avoids materializing the
+            # broadcasted `[batch * M, J, d]` tensor, which reduces memory pressure
+            # and lets the GPU execute the dominant work as one matrix multiply.
+            flat_latents_fp32 = flat_latents.to(dtype=torch.float32)
+            codebook_fp32 = self.codebook.to(dtype=torch.float32)
+            latent_norms = torch.sum(flat_latents_fp32 * flat_latents_fp32, dim=1, keepdim=True)
+            codebook_norms = torch.sum(codebook_fp32 * codebook_fp32, dim=1).unsqueeze(0)
+            distances = latent_norms + codebook_norms - 2.0 * (
+                flat_latents_fp32 @ codebook_fp32.transpose(0, 1)
             )
             indices = torch.argmin(distances, dim=1)
             quantized = self.codebook[indices].reshape(

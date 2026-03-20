@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import json
+import os
 import shutil
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import yaml  # type: ignore[import-untyped]
@@ -164,6 +166,15 @@ class TrainingConfig:
     weight_decay: float = 0.0  # Adam weight decay
     gradient_clip_norm: float | None = 1.0  # Optional global gradient clipping threshold
     device: str = "auto"  # Torch device string or `auto`
+    mixed_precision: str = "auto"  # `auto`, `disabled`, `fp16`, or `bf16`
+    enable_model_compile: bool = False  # Whether to `torch.compile` the training graph
+    allow_tf32: bool = True  # Enable TensorFloat-32 matmul kernels on supported CUDA GPUs
+    data_loader_worker_count: int | None = None  # `None` means resolve a worker count automatically
+    pin_memory: bool | None = None  # `None` means pin host batches only for CUDA runs
+    prefetch_factor: int | None = None  # Optional DataLoader prefetch depth when workers > 0
+    persistent_data_loader_workers: bool = (
+        True  # Keep DataLoader workers alive across epochs when workers > 0
+    )
     loss: RateDistortionLossConfig = RateDistortionLossConfig()  # Lagrangian loss weights
 
     def __post_init__(self) -> None:
@@ -180,6 +191,16 @@ class TrainingConfig:
             raise CodecConfigurationError("gradient_clip_norm must be strictly positive when set.")
         if not self.device:
             raise CodecConfigurationError("device must be a non-empty string.")
+        if self.mixed_precision not in {"auto", "disabled", "fp16", "bf16"}:
+            raise CodecConfigurationError(
+                "mixed_precision must be one of {'auto', 'disabled', 'fp16', 'bf16'}."
+            )
+        if self.data_loader_worker_count is not None and self.data_loader_worker_count < 0:
+            raise CodecConfigurationError(
+                "data_loader_worker_count must be non-negative when set."
+            )
+        if self.prefetch_factor is not None and self.prefetch_factor <= 0:
+            raise CodecConfigurationError("prefetch_factor must be strictly positive when set.")
 
 
 @dataclass(frozen=True)
@@ -191,6 +212,7 @@ class ArtifactConfig:
     export_root: Path = Path("models/exports")  # Root directory for export-ready artifacts
     export_onnx: bool = True  # Whether to export the encoder boundary to ONNX after training
     save_latest_checkpoint: bool = True  # Whether to persist the latest checkpoint every epoch
+    latest_checkpoint_interval: int = 1  # Save the latest checkpoint every N epochs
     save_best_checkpoint: bool = True  # Whether to persist the best validation checkpoint
     selection_metric: str = "validation_loss"  # Metric used to pick the best checkpoint
     require_selection_to_beat_preprocessing: bool = (
@@ -204,6 +226,8 @@ class ArtifactConfig:
                 "selection_metric must be one of "
                 f"{sorted(_SELECTION_METRICS)}.",
             )
+        if self.latest_checkpoint_interval <= 0:
+            raise CodecConfigurationError("latest_checkpoint_interval must be strictly positive.")
 
 
 @dataclass(frozen=True)
@@ -362,12 +386,54 @@ class TorchCodecTrainer:
         self.experiment_config = experiment_config
         self.preprocessor = FramePreprocessor(experiment_config.runtime.preprocessing)
         self.training_device = _resolve_training_device_string(experiment_config.training.device)
+        self._training_device_handle = torch_module.device(self.training_device)
+        self._training_device_type = self._training_device_handle.type
+        self._validation_diagnostics_required = _requires_exact_validation_diagnostics(
+            experiment_config
+        )
+        self._pin_memory = _resolve_pin_memory_enabled(
+            experiment_config.training.pin_memory,
+            device_type=self._training_device_type,
+        )
+        self._data_loader_worker_count = _resolve_data_loader_worker_count(
+            experiment_config.training.data_loader_worker_count,
+            device_type=self._training_device_type,
+        )
+        self._autocast_dtype = _resolve_autocast_dtype(
+            experiment_config.training.mixed_precision,
+            device=self._training_device_handle,
+        )
+        self._autocast_enabled = self._autocast_dtype is not None
         self.model = TorchFullCodec(experiment_config.model).to(self.training_device)
+        self.training_model = self.model
+        if (
+            experiment_config.training.enable_model_compile
+            and self._training_device_type in _ACCELERATOR_DEVICE_TYPES
+            and hasattr(torch_module, "compile")
+        ):
+            self.training_model = torch_module.compile(
+                self.model,
+                mode="reduce-overhead",
+            )
         self.optimizer = torch_module.optim.Adam(
             self.model.parameters(),
             lr=experiment_config.training.learning_rate,
             weight_decay=experiment_config.training.weight_decay,
         )
+        grad_scaler_cls = getattr(torch_module.amp, "GradScaler", None)
+        self._grad_scaler = (
+            None
+            if grad_scaler_cls is None or self._autocast_dtype != torch_module.float16
+            else grad_scaler_cls("cuda", enabled=self._training_device_type == "cuda")
+        )
+        if self._training_device_type == "cuda":
+            torch_module.backends.cuda.matmul.allow_tf32 = experiment_config.training.allow_tf32
+            if hasattr(torch_module.backends, "cudnn"):
+                torch_module.backends.cudnn.allow_tf32 = experiment_config.training.allow_tf32
+            if hasattr(torch_module, "set_float32_matmul_precision"):
+                torch_module.set_float32_matmul_precision(
+                    "high" if experiment_config.training.allow_tf32 else "highest"
+                )
 
     def load_prepared_datasets(self) -> tuple[PreparedPsdDataset, PreparedPsdDataset]:
         """Load the configured dataset, preprocess it, and split it into train/validation sets."""
@@ -447,21 +513,43 @@ class TorchCodecTrainer:
                 "Differentiable inverse preprocessing width does not match the model width.",
             )
 
+        data_loader_kwargs: dict[str, Any] = {
+            "batch_size": self.experiment_config.training.batch_size,
+            "collate_fn": collate_prepared_psd_samples,
+            "num_workers": self._data_loader_worker_count,
+        }
+        if self._data_loader_worker_count > 0:
+            data_loader_kwargs["persistent_workers"] = (
+                self.experiment_config.training.persistent_data_loader_workers
+            )
+            resolved_prefetch_factor = (
+                2
+                if self.experiment_config.training.prefetch_factor is None
+                else self.experiment_config.training.prefetch_factor
+            )
+            data_loader_kwargs["prefetch_factor"] = resolved_prefetch_factor
+
         train_loader: Any = TorchDataLoader(
             training_dataset,
-            batch_size=self.experiment_config.training.batch_size,
             shuffle=self.experiment_config.dataset.shuffle,
-            collate_fn=collate_prepared_psd_samples,
+            **data_loader_kwargs,
         )
         validation_loader: Any = TorchDataLoader(
             validation_dataset,
-            batch_size=self.experiment_config.training.batch_size,
             shuffle=False,
-            collate_fn=collate_prepared_psd_samples,
+            **data_loader_kwargs,
         )
         side_information_bits = float(
             self.experiment_config.runtime.preprocessing.block_count
             * self.experiment_config.runtime.preprocessing.side_information_bits_per_block
+        )
+        validation_baseline_metrics = (
+            None
+            if not self._validation_diagnostics_required
+            else self._compute_validation_baseline_metrics(
+                validation_dataset,
+                inverse_preprocessor=inverse_preprocessor,
+            )
         )
 
         checkpoint_dir = (
@@ -504,17 +592,29 @@ class TorchCodecTrainer:
             )
             validation_deployment_score = _compose_validation_deployment_score(
                 validation_psd_loss=validation_metrics.psd_loss,
-                validation_preprocessing_psd_loss=validation_metrics.preprocessing_psd_loss,
+                validation_preprocessing_psd_loss=(
+                    None
+                    if validation_baseline_metrics is None
+                    else validation_baseline_metrics.preprocessing_psd_loss
+                ),
                 validation_peak_frequency_error_hz=validation_metrics.peak_frequency_error_hz,
                 validation_preprocessing_peak_frequency_error_hz=(
-                    validation_metrics.preprocessing_peak_frequency_error_hz
+                    None
+                    if validation_baseline_metrics is None
+                    else validation_baseline_metrics.preprocessing_peak_frequency_error_hz
                 ),
                 validation_peak_power_error_db=validation_metrics.peak_power_error_db,
                 validation_preprocessing_peak_power_error_db=(
-                    validation_metrics.preprocessing_peak_power_error_db
+                    None
+                    if validation_baseline_metrics is None
+                    else validation_baseline_metrics.preprocessing_peak_power_error_db
                 ),
                 validation_task_monitor=validation_metrics.task_monitor,
-                validation_preprocessing_task_monitor=validation_metrics.preprocessing_task_monitor,
+                validation_preprocessing_task_monitor=(
+                    None
+                    if validation_baseline_metrics is None
+                    else validation_baseline_metrics.preprocessing_task_monitor
+                ),
             )
             epoch_metrics = EpochMetrics(
                 epoch_index=epoch_index,
@@ -531,15 +631,27 @@ class TorchCodecTrainer:
                 training_task_loss=training_metrics.task_loss,
                 validation_task_loss=validation_metrics.task_loss,
                 validation_task_monitor=validation_metrics.task_monitor,
-                validation_preprocessing_psd_loss=validation_metrics.preprocessing_psd_loss,
-                validation_preprocessing_task_monitor=validation_metrics.preprocessing_task_monitor,
+                validation_preprocessing_psd_loss=(
+                    None
+                    if validation_baseline_metrics is None
+                    else validation_baseline_metrics.preprocessing_psd_loss
+                ),
+                validation_preprocessing_task_monitor=(
+                    None
+                    if validation_baseline_metrics is None
+                    else validation_baseline_metrics.preprocessing_task_monitor
+                ),
                 validation_peak_frequency_error_hz=validation_metrics.peak_frequency_error_hz,
                 validation_peak_power_error_db=validation_metrics.peak_power_error_db,
                 validation_preprocessing_peak_frequency_error_hz=(
-                    validation_metrics.preprocessing_peak_frequency_error_hz
+                    None
+                    if validation_baseline_metrics is None
+                    else validation_baseline_metrics.preprocessing_peak_frequency_error_hz
                 ),
                 validation_preprocessing_peak_power_error_db=(
-                    validation_metrics.preprocessing_peak_power_error_db
+                    None
+                    if validation_baseline_metrics is None
+                    else validation_baseline_metrics.preprocessing_peak_power_error_db
                 ),
                 validation_deployment_score=validation_deployment_score,
             )
@@ -569,7 +681,16 @@ class TorchCodecTrainer:
                     )
 
             latest_checkpoint_path = checkpoint_dir / "latest.pt"
-            if self.experiment_config.artifacts.save_latest_checkpoint:
+            should_save_latest = (
+                self.experiment_config.artifacts.save_latest_checkpoint
+                and (
+                    (epoch_index + 1)
+                    % self.experiment_config.artifacts.latest_checkpoint_interval
+                    == 0
+                    or epoch_index + 1 == self.experiment_config.training.epoch_count
+                )
+            )
+            if should_save_latest:
                 self._save_checkpoint(
                     latest_checkpoint_path,
                     epoch_metrics=epoch_metrics,
@@ -674,9 +795,21 @@ class TorchCodecTrainer:
         for batch in loader:
             tensor_batch = self._batch_to_tensors(batch)
             with torch_module.set_grad_enabled(training):
-                output = self.model(tensor_batch.normalized_frames)
+                with self._autocast_context():
+                    output = self.training_model(tensor_batch.normalized_frames)
+                reconstructed_normalized_frames = output.reconstructed_normalized_frames.to(
+                    dtype=torch_module.float32
+                )
+                rate_bits = output.rate_bits.to(dtype=torch_module.float32)
+                vq_loss = output.vq_loss.to(dtype=torch_module.float32)
+                _raise_if_non_finite_tensor(
+                    reconstructed_normalized_frames,
+                    name="reconstructed_normalized_frames",
+                )
+                _raise_if_non_finite_tensor(rate_bits, name="rate_bits")
+                _raise_if_non_finite_tensor(vq_loss, name="vq_loss")
                 reconstructed_frames = inverse_preprocessor.inverse_preprocess_batch(
-                    output.reconstructed_normalized_frames,
+                    reconstructed_normalized_frames,
                     tensor_batch.side_means,
                     tensor_batch.side_log_sigmas,
                 )
@@ -684,17 +817,6 @@ class TorchCodecTrainer:
                     reconstructed_frames,
                     name="reconstructed_frames",
                 )
-                preprocessing_only_frames = None
-                if not training:
-                    preprocessing_only_frames = inverse_preprocessor.inverse_preprocess_batch(
-                        tensor_batch.normalized_frames,
-                        tensor_batch.side_means,
-                        tensor_batch.side_log_sigmas,
-                    )
-                    _raise_if_non_finite_tensor(
-                        preprocessing_only_frames,
-                        name="preprocessing_only_frames",
-                    )
                 task_loss_tensor = None
                 if (
                     self.experiment_config.task is not None
@@ -713,12 +835,13 @@ class TorchCodecTrainer:
                         frequency_grid_hz=task_frequency_grid_hz,
                         config=self.experiment_config.task,
                     )
+                    _raise_if_non_finite_tensor(task_loss_tensor, name="task_loss")
                 total_loss, breakdown = compose_rate_distortion_loss(
                     reference_frames=tensor_batch.original_frames,
                     reconstructed_frames=reconstructed_frames,
-                    rate_bits_per_frame=output.rate_bits,
+                    rate_bits_per_frame=rate_bits,
                     side_information_bits=side_information_bits,
-                    vq_loss=output.vq_loss,
+                    vq_loss=vq_loss,
                     dynamic_range_offset=self.experiment_config.runtime.preprocessing.dynamic_range_offset,
                     weights=self.experiment_config.training.loss,
                     task_loss=task_loss_tensor,
@@ -726,22 +849,30 @@ class TorchCodecTrainer:
                 _raise_if_non_finite_tensor(total_loss, name="total_loss")
 
                 if training:
-                    self.optimizer.zero_grad()
-                    total_loss.backward()  # type: ignore[no-untyped-call]
-                    if self.experiment_config.training.gradient_clip_norm is not None:
-                        torch_module.nn.utils.clip_grad_norm_(
-                            self.model.parameters(),
-                            self.experiment_config.training.gradient_clip_norm,
-                        )
-                    self.optimizer.step()
+                    self.optimizer.zero_grad(set_to_none=True)
+                    if self._grad_scaler is not None:
+                        self._grad_scaler.scale(total_loss).backward()
+                        if self.experiment_config.training.gradient_clip_norm is not None:
+                            self._grad_scaler.unscale_(self.optimizer)
+                            torch_module.nn.utils.clip_grad_norm_(
+                                self.model.parameters(),
+                                self.experiment_config.training.gradient_clip_norm,
+                            )
+                        self._grad_scaler.step(self.optimizer)
+                        self._grad_scaler.update()
+                    else:
+                        total_loss.backward()  # type: ignore[no-untyped-call]
+                        if self.experiment_config.training.gradient_clip_norm is not None:
+                            torch_module.nn.utils.clip_grad_norm_(
+                                self.model.parameters(),
+                                self.experiment_config.training.gradient_clip_norm,
+                            )
+                        self.optimizer.step()
 
             batch_size = tensor_batch.original_frames.shape[0]
             validation_diagnostics = self._compute_validation_diagnostics(
                 batch,
                 reconstructed_frames.detach().cpu().numpy(),
-                None
-                if preprocessing_only_frames is None
-                else preprocessing_only_frames.detach().cpu().numpy(),
                 dataset_frequency_grid_hz,
             )
             aggregated.update(
@@ -754,42 +885,53 @@ class TorchCodecTrainer:
 
     def _batch_to_tensors(self, batch: PreparedPsdBatch) -> _TorchBatch:
         """Move one NumPy batch onto the configured torch device."""
-        torch_module = _require_torch()
-        device = torch_module.device(self.training_device)
         noise_floors = None
         if batch.noise_floors is not None:
-            noise_floors = torch_module.as_tensor(
-                batch.noise_floors, dtype=torch_module.float32, device=device
+            noise_floors = self._numpy_batch_to_device_tensor(
+                batch.noise_floors,
             )
         return _TorchBatch(
-            original_frames=torch_module.as_tensor(
-                batch.original_frames,
-                dtype=torch_module.float32,
-                device=device,
-            ),
-            normalized_frames=torch_module.as_tensor(
-                batch.normalized_frames,
-                dtype=torch_module.float32,
-                device=device,
-            ),
-            side_means=torch_module.as_tensor(
-                batch.side_means,
-                dtype=torch_module.float32,
-                device=device,
-            ),
-            side_log_sigmas=torch_module.as_tensor(
-                batch.side_log_sigmas,
-                dtype=torch_module.float32,
-                device=device,
-            ),
+            original_frames=self._numpy_batch_to_device_tensor(batch.original_frames),
+            normalized_frames=self._numpy_batch_to_device_tensor(batch.normalized_frames),
+            side_means=self._numpy_batch_to_device_tensor(batch.side_means),
+            side_log_sigmas=self._numpy_batch_to_device_tensor(batch.side_log_sigmas),
             noise_floors=noise_floors,
+        )
+
+    def _numpy_batch_to_device_tensor(
+        self,
+        values: np.ndarray,
+    ) -> Tensor:
+        """Convert one contiguous NumPy batch into a torch tensor on the training device."""
+        torch_module = _require_torch()
+        cpu_tensor = torch_module.from_numpy(
+            np.asarray(values, dtype=np.float32, order="C")
+        )
+        if self._pin_memory and self._training_device_type == "cuda":
+            cpu_tensor = cpu_tensor.pin_memory()
+            return cast(
+                Tensor,
+                cpu_tensor.to(self._training_device_handle, non_blocking=True),
+            )
+        return cast(Tensor, cpu_tensor.to(self._training_device_handle))
+
+    def _autocast_context(self) -> Any:
+        """Return the resolved autocast context for the active training device."""
+        torch_module = _require_torch()
+        if not self._autocast_enabled:
+            return contextlib.nullcontext()
+        return cast(
+            Any,
+            torch_module.autocast(
+                device_type=self._training_device_type,
+                dtype=self._autocast_dtype,
+            ),
         )
 
     def _compute_validation_diagnostics(
         self,
         batch: PreparedPsdBatch,
         reconstructed_frames: np.ndarray,
-        preprocessing_only_frames: np.ndarray | None,
         frequency_grid_hz: np.ndarray | None,
     ) -> _ValidationDiagnostics | None:
         """Compute exact deployment-aligned validation metrics for one batch.
@@ -797,19 +939,14 @@ class TorchCodecTrainer:
         Purpose:
             Validation must judge the trained codec against the same quantities shown
             in the deployment notebook, not only against differentiable surrogates.
-            This helper therefore compares the full reconstruction against both the
-            reference frames and the preprocessing-only baseline using exact PSD and
-            raw dominant-peak metrics.
+            This helper therefore compares the learned reconstruction against the
+            reference frames using exact PSD-task-adjacent diagnostics. The fixed
+            preprocessing-only baseline is precomputed once per validation dataset.
         """
-        if preprocessing_only_frames is None:
+        if not self._validation_diagnostics_required:
             return None
 
         diagnostics = _ValidationDiagnostics(
-            preprocessing_psd_loss=_batch_log_spectral_distortion(
-                batch.original_frames,
-                preprocessing_only_frames,
-                dynamic_range_offset=self.experiment_config.runtime.preprocessing.dynamic_range_offset,
-            ),
             peak_frequency_error_hz=(
                 None
                 if frequency_grid_hz is None
@@ -822,19 +959,6 @@ class TorchCodecTrainer:
             peak_power_error_db=_batch_peak_power_error_db(
                 batch.original_frames,
                 reconstructed_frames,
-            ),
-            preprocessing_peak_frequency_error_hz=(
-                None
-                if frequency_grid_hz is None
-                else _batch_peak_frequency_error_hz(
-                    batch.original_frames,
-                    preprocessing_only_frames,
-                    frequency_grid_hz,
-                )
-            ),
-            preprocessing_peak_power_error_db=_batch_peak_power_error_db(
-                batch.original_frames,
-                preprocessing_only_frames,
             ),
         )
         if self.experiment_config.task is None:
@@ -857,29 +981,97 @@ class TorchCodecTrainer:
                 strict=True,
             )
         ]
-        preprocessing_task_values = [
-            illustrative_task_loss(
-                reference_frame=reference_frame,
-                reconstructed_frame=preprocessing_frame,
-                noise_floor=noise_floor,
-                frequency_grid_hz=frequency_grid_hz,
-                config=self.experiment_config.task,
-            )
-            for reference_frame, preprocessing_frame, noise_floor in zip(
-                batch.original_frames,
-                preprocessing_only_frames,
-                batch.noise_floors,
-                strict=True,
-            )
-        ]
         return _ValidationDiagnostics(
             task_monitor=float(np.mean(task_values)),
-            preprocessing_psd_loss=diagnostics.preprocessing_psd_loss,
-            preprocessing_task_monitor=float(np.mean(preprocessing_task_values)),
             peak_frequency_error_hz=diagnostics.peak_frequency_error_hz,
             peak_power_error_db=diagnostics.peak_power_error_db,
-            preprocessing_peak_frequency_error_hz=diagnostics.preprocessing_peak_frequency_error_hz,
-            preprocessing_peak_power_error_db=diagnostics.preprocessing_peak_power_error_db,
+        )
+
+    def _compute_validation_baseline_metrics(
+        self,
+        validation_dataset: PreparedPsdDataset,
+        *,
+        inverse_preprocessor: DifferentiableInversePreprocessor,
+    ) -> _ValidationBaselineMetrics:
+        """Precompute the fixed preprocessing-only validation diagnostics once.
+
+        Purpose:
+            The preprocessing-only reconstruction does not change across epochs, so
+            recomputing its exact PSD and task metrics inside every validation pass
+            wastes substantial CPU time. This helper amortizes that cost up front.
+        """
+        torch_module = _require_torch()
+        preprocessing_frame_batches: list[np.ndarray] = []
+        chunk_size = max(1, self.experiment_config.training.batch_size * 4)
+        for start_index in range(0, len(validation_dataset), chunk_size):
+            stop_index = min(len(validation_dataset), start_index + chunk_size)
+            preprocessing_batch = inverse_preprocessor.inverse_preprocess_batch(
+                torch_module.as_tensor(
+                    validation_dataset.normalized_frames[start_index:stop_index],
+                    dtype=torch_module.float32,
+                ),
+                torch_module.as_tensor(
+                    validation_dataset.side_means[start_index:stop_index],
+                    dtype=torch_module.float32,
+                ),
+                torch_module.as_tensor(
+                    validation_dataset.side_log_sigmas[start_index:stop_index],
+                    dtype=torch_module.float32,
+                ),
+            )
+            preprocessing_frame_batches.append(preprocessing_batch.cpu().numpy())
+
+        preprocessing_only_frames = np.concatenate(preprocessing_frame_batches, axis=0)
+        if preprocessing_only_frames.shape != validation_dataset.original_frames.shape:
+            raise CodecConfigurationError(
+                "Preprocessing-only validation frames do not align with the validation dataset."
+            )
+
+        preprocessing_psd_loss = _batch_log_spectral_distortion(
+            validation_dataset.original_frames,
+            preprocessing_only_frames,
+            dynamic_range_offset=self.experiment_config.runtime.preprocessing.dynamic_range_offset,
+        )
+        peak_frequency_error_hz = (
+            None
+            if validation_dataset.frequency_grid_hz is None
+            else _batch_peak_frequency_error_hz(
+                validation_dataset.original_frames,
+                preprocessing_only_frames,
+                validation_dataset.frequency_grid_hz,
+            )
+        )
+        peak_power_error_db = _batch_peak_power_error_db(
+            validation_dataset.original_frames,
+            preprocessing_only_frames,
+        )
+        task_monitor = None
+        if (
+            self.experiment_config.task is not None
+            and validation_dataset.noise_floors is not None
+            and validation_dataset.frequency_grid_hz is not None
+        ):
+            task_values = [
+                illustrative_task_loss(
+                    reference_frame=reference_frame,
+                    reconstructed_frame=preprocessing_frame,
+                    noise_floor=noise_floor,
+                    frequency_grid_hz=validation_dataset.frequency_grid_hz,
+                    config=self.experiment_config.task,
+                )
+                for reference_frame, preprocessing_frame, noise_floor in zip(
+                    validation_dataset.original_frames,
+                    preprocessing_only_frames,
+                    validation_dataset.noise_floors,
+                    strict=True,
+                )
+            ]
+            task_monitor = float(np.mean(task_values))
+        return _ValidationBaselineMetrics(
+            preprocessing_psd_loss=preprocessing_psd_loss,
+            preprocessing_task_monitor=task_monitor,
+            preprocessing_peak_frequency_error_hz=peak_frequency_error_hz,
+            preprocessing_peak_power_error_db=peak_power_error_db,
         )
 
     def _save_checkpoint(
@@ -1024,18 +1216,10 @@ class _AggregatedMetrics:
     sample_count: int = 0
     task_monitor_sum: float = 0.0
     task_monitor_count: int = 0
-    preprocessing_psd_loss_sum: float = 0.0
-    preprocessing_psd_loss_count: int = 0
-    preprocessing_task_monitor_sum: float = 0.0
-    preprocessing_task_monitor_count: int = 0
     peak_frequency_error_hz_sum: float = 0.0
     peak_frequency_error_hz_count: int = 0
     peak_power_error_db_sum: float = 0.0
     peak_power_error_db_count: int = 0
-    preprocessing_peak_frequency_error_hz_sum: float = 0.0
-    preprocessing_peak_frequency_error_hz_count: int = 0
-    preprocessing_peak_power_error_db_sum: float = 0.0
-    preprocessing_peak_power_error_db_count: int = 0
 
     def update(
         self,
@@ -1058,16 +1242,6 @@ class _AggregatedMetrics:
         if validation_diagnostics.task_monitor is not None:
             self.task_monitor_sum += validation_diagnostics.task_monitor * batch_size
             self.task_monitor_count += batch_size
-        if validation_diagnostics.preprocessing_psd_loss is not None:
-            self.preprocessing_psd_loss_sum += (
-                validation_diagnostics.preprocessing_psd_loss * batch_size
-            )
-            self.preprocessing_psd_loss_count += batch_size
-        if validation_diagnostics.preprocessing_task_monitor is not None:
-            self.preprocessing_task_monitor_sum += (
-                validation_diagnostics.preprocessing_task_monitor * batch_size
-            )
-            self.preprocessing_task_monitor_count += batch_size
         if validation_diagnostics.peak_frequency_error_hz is not None:
             self.peak_frequency_error_hz_sum += (
                 validation_diagnostics.peak_frequency_error_hz * batch_size
@@ -1078,16 +1252,6 @@ class _AggregatedMetrics:
                 validation_diagnostics.peak_power_error_db * batch_size
             )
             self.peak_power_error_db_count += batch_size
-        if validation_diagnostics.preprocessing_peak_frequency_error_hz is not None:
-            self.preprocessing_peak_frequency_error_hz_sum += (
-                validation_diagnostics.preprocessing_peak_frequency_error_hz * batch_size
-            )
-            self.preprocessing_peak_frequency_error_hz_count += batch_size
-        if validation_diagnostics.preprocessing_peak_power_error_db is not None:
-            self.preprocessing_peak_power_error_db_sum += (
-                validation_diagnostics.preprocessing_peak_power_error_db * batch_size
-            )
-            self.preprocessing_peak_power_error_db_count += batch_size
 
     def finalize(self) -> _FinalizedMetrics:
         """Return averaged scalar metrics for one epoch."""
@@ -1104,16 +1268,6 @@ class _AggregatedMetrics:
             vq_loss=self.vq_loss_sum / self.sample_count,
             task_loss=self.task_loss_sum / self.sample_count,
             task_monitor=task_monitor,
-            preprocessing_psd_loss=(
-                None
-                if self.preprocessing_psd_loss_count == 0
-                else self.preprocessing_psd_loss_sum / self.preprocessing_psd_loss_count
-            ),
-            preprocessing_task_monitor=(
-                None
-                if self.preprocessing_task_monitor_count == 0
-                else self.preprocessing_task_monitor_sum / self.preprocessing_task_monitor_count
-            ),
             peak_frequency_error_hz=(
                 None
                 if self.peak_frequency_error_hz_count == 0
@@ -1123,22 +1277,6 @@ class _AggregatedMetrics:
                 None
                 if self.peak_power_error_db_count == 0
                 else self.peak_power_error_db_sum / self.peak_power_error_db_count
-            ),
-            preprocessing_peak_frequency_error_hz=(
-                None
-                if self.preprocessing_peak_frequency_error_hz_count == 0
-                else (
-                    self.preprocessing_peak_frequency_error_hz_sum
-                    / self.preprocessing_peak_frequency_error_hz_count
-                )
-            ),
-            preprocessing_peak_power_error_db=(
-                None
-                if self.preprocessing_peak_power_error_db_count == 0
-                else (
-                    self.preprocessing_peak_power_error_db_sum
-                    / self.preprocessing_peak_power_error_db_count
-                )
             ),
         )
 
@@ -1154,10 +1292,16 @@ class _FinalizedMetrics:
     vq_loss: float
     task_loss: float
     task_monitor: float | None = None
-    preprocessing_psd_loss: float | None = None
-    preprocessing_task_monitor: float | None = None
     peak_frequency_error_hz: float | None = None
     peak_power_error_db: float | None = None
+
+
+@dataclass(frozen=True)
+class _ValidationBaselineMetrics:
+    """Exact preprocessing-only diagnostics that stay fixed across epochs."""
+
+    preprocessing_psd_loss: float
+    preprocessing_task_monitor: float | None = None
     preprocessing_peak_frequency_error_hz: float | None = None
     preprocessing_peak_power_error_db: float | None = None
 
@@ -1167,12 +1311,8 @@ class _ValidationDiagnostics:
     """Exact validation-only diagnostics aligned with deployment analysis."""
 
     task_monitor: float | None = None
-    preprocessing_psd_loss: float | None = None
-    preprocessing_task_monitor: float | None = None
     peak_frequency_error_hz: float | None = None
     peak_power_error_db: float | None = None
-    preprocessing_peak_frequency_error_hz: float | None = None
-    preprocessing_peak_power_error_db: float | None = None
 
 
 def _batch_log_spectral_distortion(
@@ -1359,6 +1499,82 @@ def _can_use_training_device(
     except Exception:
         return False
     return True
+
+
+def _resolve_autocast_dtype(
+    mixed_precision: str,
+    *,
+    device: Any,
+) -> Any | None:
+    """Resolve the autocast dtype for the active training device.
+
+    Purpose:
+        Keep the model matmuls in reduced precision on CUDA when that is safe, while
+        leaving numerically sensitive reconstruction and loss code in explicit
+        float32 outside autocast.
+    """
+    torch_module = _require_torch()
+    if mixed_precision == "disabled":
+        return None
+    if device.type != "cuda":
+        return None
+    if mixed_precision == "auto":
+        return (
+            torch_module.bfloat16
+            if torch_module.cuda.is_bf16_supported()
+            else torch_module.float16
+        )
+    if mixed_precision == "bf16":
+        if not torch_module.cuda.is_bf16_supported():
+            raise CodecConfigurationError(
+                "mixed_precision='bf16' requires CUDA bfloat16 support on this system."
+            )
+        return torch_module.bfloat16
+    if mixed_precision == "fp16":
+        return torch_module.float16
+    raise CodecConfigurationError(f"Unsupported mixed_precision mode: {mixed_precision}.")
+
+
+def _resolve_pin_memory_enabled(
+    configured_pin_memory: bool | None,
+    *,
+    device_type: str,
+) -> bool:
+    """Return whether host batches should be pinned before GPU transfer."""
+    if configured_pin_memory is not None:
+        return configured_pin_memory
+    return device_type == "cuda"
+
+
+def _resolve_data_loader_worker_count(
+    configured_worker_count: int | None,
+    *,
+    device_type: str,
+) -> int:
+    """Return the DataLoader worker count for one training run.
+
+    Purpose:
+        CUDA runs benefit from overlapping host-side collation with GPU execution,
+        while CPU-only runs often lose time to multiprocessing overhead on in-memory
+        NumPy datasets. The auto policy therefore stays conservative on CPU.
+    """
+    if configured_worker_count is not None:
+        return configured_worker_count
+    if device_type != "cuda":
+        return 0
+    cpu_count = os.cpu_count() or 1
+    return max(2, min(8, cpu_count // 2))
+
+
+def _requires_exact_validation_diagnostics(
+    experiment_config: TrainingExperimentConfig,
+) -> bool:
+    """Return whether one experiment needs exact deployment-style validation metrics."""
+    if experiment_config.artifacts.selection_metric != "validation_loss":
+        return True
+    if experiment_config.artifacts.require_selection_to_beat_preprocessing:
+        return True
+    return experiment_config.task is not None
 
 
 def _expect_mapping(payload: dict[str, Any], key: str) -> dict[str, Any]:

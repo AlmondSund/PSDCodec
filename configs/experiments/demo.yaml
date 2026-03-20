@@ -58,13 +58,23 @@ training:
   # This canonical demo run prioritizes deployment fidelity over aggressive
   # compression. The deployment notebook showed that the learned stage was still
   # losing narrow peaks, so the bitrate penalty is relaxed and the task term is
-  # made stronger than in the previous quality-first attempt.
+  # made stronger than in the previous quality-first attempt. The runtime settings
+  # below are intentionally accelerator-oriented: the demo should saturate CUDA
+  # hardware with a materially larger batch, reduced-precision matmuls, and a
+  # compiled training graph instead of idling with tiny batches on float32.
   epoch_count: 100
-  batch_size: 8
+  batch_size: 64
   learning_rate: 2.0e-4
   weight_decay: 1.0e-5
   gradient_clip_norm: 1.0
   device: auto
+  mixed_precision: auto
+  enable_model_compile: true
+  allow_tf32: true
+  data_loader_worker_count:
+  pin_memory:
+  prefetch_factor: 4
+  persistent_data_loader_workers: true
   loss:
     psd_weight: 3.0
     rate_weight: 1.0e-4
@@ -77,6 +87,7 @@ artifacts:
   export_root: models/exports
   export_onnx: true
   save_latest_checkpoint: true
+  latest_checkpoint_interval: 10
   save_best_checkpoint: true
   # The deployment analysis showed that even the exact illustrative task monitor was
   # not sufficient by itself: the exported model could still lose the raw dominant
