@@ -362,11 +362,32 @@ def load_campaign_frame_sample(
     artifacts: DeploymentArtifacts,
     *,
     frame_index: int = 0,
+    campaign_include_globs: Sequence[str] | None = None,
+    campaign_exclude_globs: Sequence[str] | None = None,
+    node_include_globs: Sequence[str] | None = None,
 ) -> CampaignFrameSample:
-    """Load one demo PSD frame from the campaign corpus used during training."""
+    """Load one campaign-backed PSD frame for notebook or deployment inspection.
+
+    Args:
+        artifacts: Deployment artifact bundle created from one trained export directory.
+        frame_index: Deterministic frame index inside the filtered campaign stream.
+        campaign_include_globs: Optional campaign-directory glob overrides applied only
+            to this single-frame load.
+        campaign_exclude_globs: Optional campaign-directory exclusion globs applied only
+            to this single-frame load.
+        node_include_globs: Optional node-file glob overrides applied only to this
+            single-frame load.
+
+    Returns:
+        The requested `CampaignFrameSample` in the same PSD domain used by the
+        deployment evaluation helpers.
+    """
     return load_campaign_frame_samples(
         artifacts,
         frame_indices=[frame_index],
+        campaign_include_globs=campaign_include_globs,
+        campaign_exclude_globs=campaign_exclude_globs,
+        node_include_globs=node_include_globs,
     )[0]
 
 
@@ -375,6 +396,9 @@ def load_campaign_frame_samples(
     *,
     frame_indices: Sequence[int] | None = None,
     max_frames: int | None = None,
+    campaign_include_globs: Sequence[str] | None = None,
+    campaign_exclude_globs: Sequence[str] | None = None,
+    node_include_globs: Sequence[str] | None = None,
 ) -> tuple[CampaignFrameSample, ...]:
     """Load multiple campaign-backed PSD frames with one bundle parse.
 
@@ -386,6 +410,12 @@ def load_campaign_frame_samples(
         artifacts: Deployment artifact bundle created from one trained export directory.
         frame_indices: Optional explicit frame indices to load, in the requested order.
         max_frames: Number of leading frames to load when `frame_indices` is omitted.
+        campaign_include_globs: Optional campaign-directory glob overrides applied only
+            to this notebook/deployment load.
+        campaign_exclude_globs: Optional campaign-directory exclusion globs applied only
+            to this notebook/deployment load.
+        node_include_globs: Optional node-file glob overrides applied only to this
+            notebook/deployment load.
 
     Returns:
         A tuple of `CampaignFrameSample` objects ordered exactly as requested.
@@ -400,6 +430,24 @@ def load_campaign_frame_samples(
         max_frames=max_frames,
     )
     dataset_config = _resolve_campaign_dataset_config(artifacts)
+    resolved_campaign_include_globs = _resolve_glob_selection(
+        configured_globs=dataset_config.campaign_include_globs,
+        override_globs=campaign_include_globs,
+        field_name="campaign_include_globs",
+        allow_empty=False,
+    )
+    resolved_campaign_exclude_globs = _resolve_glob_selection(
+        configured_globs=dataset_config.campaign_exclude_globs,
+        override_globs=campaign_exclude_globs,
+        field_name="campaign_exclude_globs",
+        allow_empty=True,
+    )
+    resolved_node_include_globs = _resolve_glob_selection(
+        configured_globs=dataset_config.campaign_node_globs,
+        override_globs=node_include_globs,
+        field_name="node_include_globs",
+        allow_empty=False,
+    )
 
     resolved_dataset_path = _resolve_repository_path(
         export_dir=artifacts.export_dir,
@@ -411,9 +459,9 @@ def load_campaign_frame_samples(
         )
     bundle = load_campaign_dataset_bundle(
         resolved_dataset_path,
-        include_campaign_globs=dataset_config.campaign_include_globs,
-        exclude_campaign_globs=dataset_config.campaign_exclude_globs,
-        include_node_globs=dataset_config.campaign_node_globs,
+        include_campaign_globs=resolved_campaign_include_globs,
+        exclude_campaign_globs=resolved_campaign_exclude_globs,
+        include_node_globs=resolved_node_include_globs,
         target_bin_count=dataset_config.campaign_target_bin_count,
         value_scale=dataset_config.campaign_value_scale,
         max_frames=max(selected_indices) + 1,
@@ -513,6 +561,23 @@ def _resolve_requested_frame_indices(
     if any(frame_index < 0 for frame_index in normalized):
         raise CodecConfigurationError("frame indices must be non-negative.")
     return normalized
+
+
+def _resolve_glob_selection(
+    *,
+    configured_globs: Sequence[str],
+    override_globs: Sequence[str] | None,
+    field_name: str,
+    allow_empty: bool,
+) -> list[str]:
+    """Resolve one notebook-facing glob override against the export defaults."""
+    if override_globs is None:
+        return [str(glob_pattern) for glob_pattern in configured_globs]
+
+    resolved_globs = [str(glob_pattern) for glob_pattern in override_globs]
+    if not allow_empty and not resolved_globs:
+        raise CodecConfigurationError(f"{field_name} must contain at least one glob.")
+    return resolved_globs
 
 
 def _load_exported_source_config_if_present(
@@ -644,9 +709,36 @@ def evaluate_deployment_batch(
     *,
     max_frames: int = 24,
     frame_indices: Sequence[int] | None = None,
+    campaign_include_globs: Sequence[str] | None = None,
+    campaign_exclude_globs: Sequence[str] | None = None,
+    node_include_globs: Sequence[str] | None = None,
     task_config: IllustrativeTaskConfig | None = None,
 ) -> DeploymentBatchReport:
-    """Evaluate a batch of campaign frames through the deployed codec."""
+    """Evaluate a batch of campaign frames through the deployed codec.
+
+    Purpose:
+        Keep notebook-scale deployment analysis configurable without mutating the
+        exported training config. Callers can override campaign/node globs locally
+        while preserving the same evaluation and reporting pipeline.
+
+    Args:
+        service: Ready-to-use deployment service built from exported artifacts.
+        artifacts: Deployment artifact bundle created from one trained export directory.
+        max_frames: Number of leading frames to evaluate when `frame_indices` is omitted.
+        frame_indices: Optional explicit frame indices within the filtered campaign
+            stream. When set, this overrides `max_frames`.
+        campaign_include_globs: Optional campaign-directory glob overrides applied only
+            to this notebook/deployment evaluation.
+        campaign_exclude_globs: Optional campaign-directory exclusion globs applied only
+            to this notebook/deployment evaluation.
+        node_include_globs: Optional node-file glob overrides applied only to this
+            notebook/deployment evaluation.
+        task_config: Optional illustrative sensing task used for additional metrics.
+
+    Returns:
+        A `DeploymentBatchReport` covering the selected frames, their reconstructions,
+        and the aggregate readiness summary.
+    """
     selected_indices = _resolve_requested_frame_indices(
         frame_indices=frame_indices,
         max_frames=max_frames,
@@ -654,6 +746,9 @@ def evaluate_deployment_batch(
     samples = load_campaign_frame_samples(
         artifacts,
         frame_indices=selected_indices,
+        campaign_include_globs=campaign_include_globs,
+        campaign_exclude_globs=campaign_exclude_globs,
+        node_include_globs=node_include_globs,
     )
 
     return _evaluate_samples(

@@ -131,3 +131,48 @@ def test_create_deployment_animation_returns_funcanimation() -> None:
 
     assert isinstance(animation, FuncAnimation)
     assert cast(Any, animation).event_source.interval == 250
+
+
+def test_create_deployment_animation_can_plot_dbm_scale() -> None:
+    """The notebook animation should optionally render PSD traces in dBm."""
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+
+    report = _make_batch_report(frame_count=1)
+    frame_report = report.frame_reports[0]
+
+    animation = create_deployment_animation(
+        report.frame_reports,
+        interval_ms=250,
+        plot_dbm=True,
+    )
+    cast(Any, animation)._func(0)
+
+    spectrum_axis = cast(Any, animation)._fig.axes[0]
+    plotted_original = spectrum_axis.lines[0].get_ydata()
+
+    assert spectrum_axis.get_ylabel() == "PSD [dBm]"
+    np.testing.assert_allclose(
+        plotted_original,
+        10.0 * np.log10(frame_report.original_frame),
+    )
+
+
+def test_create_deployment_animation_hides_noise_floor_from_legend_when_disabled() -> None:
+    """The spectrum legend should omit the noise-floor entry when disabled."""
+    matplotlib = pytest.importorskip("matplotlib")
+    matplotlib.use("Agg")
+
+    report = _make_batch_report(frame_count=1)
+
+    animation = create_deployment_animation(
+        report.frame_reports,
+        interval_ms=250,
+        show_noise_floor=False,
+    )
+
+    spectrum_axis = cast(Any, animation)._fig.axes[0]
+    legend = spectrum_axis.get_legend()
+    legend_labels = [text.get_text() for text in legend.get_texts()]
+
+    assert "Noise floor" not in legend_labels

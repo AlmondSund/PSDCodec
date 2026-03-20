@@ -12,6 +12,7 @@ import pytest
 import yaml  # type: ignore[import-untyped]
 
 from codec.exceptions import CodecConfigurationError
+from data.campaigns import CampaignDatasetBundle
 from interfaces.deployment import (
     DeploymentArtifacts,
     create_deployment_service,
@@ -138,3 +139,73 @@ def test_campaign_frame_loading_falls_back_to_source_sidecar_for_npz_exports(
     assert len(samples) == 2
     assert samples[0].campaign_label == "RBW10"
     assert samples[0].frequency_grid_hz.size == target_bin_count
+
+
+def test_load_campaign_frame_samples_accepts_campaign_and_node_overrides(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Notebook loaders should accept campaign/node filter overrides per call."""
+    config = TrainingExperimentConfig.from_yaml(Path("configs/experiments/demo.yaml"))
+    export_dir = tmp_path / "models" / "exports" / "demo"
+    export_dir.mkdir(parents=True)
+
+    observed_arguments: dict[str, object] = {}
+
+    def _fake_load_campaign_dataset_bundle(
+        campaign_root: str | Path,
+        *,
+        include_campaign_globs: list[str] | tuple[str, ...] | None = None,
+        exclude_campaign_globs: list[str] | tuple[str, ...] | None = None,
+        include_node_globs: list[str] | tuple[str, ...] | None = None,
+        target_bin_count: int | None = None,
+        value_scale: str = "db_to_power",
+        max_frames: int | None = None,
+        noise_floor_window: int | None = None,
+        noise_floor_percentile: float = 10.0,
+    ) -> CampaignDatasetBundle:
+        del campaign_root, target_bin_count, value_scale, max_frames
+        del noise_floor_window, noise_floor_percentile
+        observed_arguments["include_campaign_globs"] = include_campaign_globs
+        observed_arguments["exclude_campaign_globs"] = exclude_campaign_globs
+        observed_arguments["include_node_globs"] = include_node_globs
+        return CampaignDatasetBundle(
+            frames=np.ones((1, 8), dtype=np.float64),
+            frequency_grid_hz=np.linspace(88.0e6, 108.0e6, num=8, dtype=np.float64),
+            campaign_labels=np.asarray(["ANTENNA_sweep"]),
+            campaign_ids=np.asarray([1]),
+            node_labels=np.asarray(["Node1"]),
+            sequence_ids=np.asarray(["ANTENNA_sweep/Node1"]),
+            timestamps_ms=np.asarray([1_700_000_000_000]),
+        )
+
+    monkeypatch.setattr(
+        "interfaces.deployment.load_campaign_dataset_bundle",
+        _fake_load_campaign_dataset_bundle,
+    )
+
+    artifacts = DeploymentArtifacts(
+        export_dir=export_dir,
+        runtime_asset_dir=export_dir / "runtime_assets",
+        onnx_path=export_dir / "encoder.onnx",
+        checkpoint_path=export_dir / "best.pt",
+        runtime_config=config.runtime,
+        experiment_config=config,
+        codebook=np.zeros((1, 1), dtype=np.float64),
+        probabilities=None,
+    )
+
+    samples = load_campaign_frame_samples(
+        artifacts,
+        max_frames=1,
+        campaign_include_globs=["ANTENNA_sweep"],
+        campaign_exclude_globs=["RBW_*"],
+        node_include_globs=["Node1.csv"],
+    )
+
+    assert len(samples) == 1
+    assert samples[0].campaign_label == "ANTENNA_sweep"
+    assert samples[0].node_label == "Node1"
+    assert observed_arguments["include_campaign_globs"] == ["ANTENNA_sweep"]
+    assert observed_arguments["exclude_campaign_globs"] == ["RBW_*"]
+    assert observed_arguments["include_node_globs"] == ["Node1.csv"]

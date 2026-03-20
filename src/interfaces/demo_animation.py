@@ -94,6 +94,7 @@ def create_deployment_animation(
     *,
     interval_ms: int = 900,
     show_noise_floor: bool = True,
+    plot_dbm: bool = False,
 ) -> Any:
     """Create a matplotlib ``FuncAnimation`` over deployment demo examples.
 
@@ -108,6 +109,7 @@ def create_deployment_animation(
         frame_reports: Ordered deployment frame reports to animate.
         interval_ms: Delay between frames in milliseconds.
         show_noise_floor: Whether to plot the estimated noise floor when present.
+        plot_dbm: Whether to plot PSD traces in dBm instead of linear power [mW].
 
     Returns:
         A ready-to-render ``matplotlib.animation.FuncAnimation`` object.
@@ -165,11 +167,11 @@ def create_deployment_animation(
         color="#2A9D8F",
         linewidth=1.2,
         linestyle=":",
-        label="Noise floor",
+        label="Noise floor" if show_noise_floor else "_nolegend_",
     )[0]
     spectrum_axis.set_title("Deployment Reconstruction Walkthrough", loc="left")
     spectrum_axis.set_xlabel("Frequency [MHz]")
-    spectrum_axis.set_ylabel("Linear power")
+    spectrum_axis.set_ylabel("PSD [dBm]" if plot_dbm else "Linear power [mW]")
     spectrum_axis.grid(alpha=0.2)
     spectrum_axis.legend(loc="upper right")
 
@@ -213,24 +215,32 @@ def create_deployment_animation(
         """Update all artists for one animation frame."""
         frame_report = frame_reports[animation_index]
         frequency_mhz = frame_report.frequency_grid_hz / 1.0e6
+        original_values = _power_to_plot_scale(frame_report.original_frame, plot_dbm=plot_dbm)
+        preprocessing_values = _power_to_plot_scale(
+            frame_report.preprocessing_only_frame,
+            plot_dbm=plot_dbm,
+        )
+        codec_values = _power_to_plot_scale(frame_report.reconstructed_frame, plot_dbm=plot_dbm)
 
-        original_line.set_data(frequency_mhz, frame_report.original_frame)
-        preprocessing_line.set_data(frequency_mhz, frame_report.preprocessing_only_frame)
-        codec_line.set_data(frequency_mhz, frame_report.reconstructed_frame)
+        original_line.set_data(frequency_mhz, original_values)
+        preprocessing_line.set_data(frequency_mhz, preprocessing_values)
+        codec_line.set_data(frequency_mhz, codec_values)
         if show_noise_floor and frame_report.noise_floor is not None:
-            noise_floor_line.set_data(frequency_mhz, frame_report.noise_floor)
+            noise_floor_values = _power_to_plot_scale(frame_report.noise_floor, plot_dbm=plot_dbm)
+            noise_floor_line.set_data(frequency_mhz, noise_floor_values)
             noise_floor_line.set_visible(True)
         else:
+            noise_floor_values = None
             noise_floor_line.set_data([], [])
             noise_floor_line.set_visible(False)
 
         signal_stack = [
-            frame_report.original_frame,
-            frame_report.preprocessing_only_frame,
-            frame_report.reconstructed_frame,
+            original_values,
+            preprocessing_values,
+            codec_values,
         ]
-        if show_noise_floor and frame_report.noise_floor is not None:
-            signal_stack.append(frame_report.noise_floor)
+        if noise_floor_values is not None:
+            signal_stack.append(noise_floor_values)
         y_min = min(float(np.min(values)) for values in signal_stack)
         y_max = max(float(np.max(values)) for values in signal_stack)
         y_margin = max(1.0e-12, 0.08 * (y_max - y_min))
@@ -294,6 +304,30 @@ def _require_matplotlib() -> tuple[Any, Any]:
     if _plt is None or _FuncAnimation is None:
         raise ImportError("matplotlib is required to build the deployment animation.")
     return _plt, _FuncAnimation
+
+
+def _power_to_plot_scale(
+    values: np.ndarray,  # Linear-power PSD samples in milliwatts
+    *,
+    plot_dbm: bool,
+) -> np.ndarray:
+    """Convert one PSD trace into the plotting domain requested by the notebook.
+
+    Purpose:
+        The deployment pipeline stores PSD values as linear power in milliwatts so
+        the distortion metrics remain physically meaningful. Notebook visualization
+        can still be easier to interpret in dBm, so this helper keeps the unit
+        conversion local to plotting without mutating the underlying evaluation
+        reports.
+    """
+    plot_values = np.asarray(values, dtype=np.float64)
+    if not plot_dbm:
+        return plot_values
+
+    # dBm conversion requires strictly positive power in milliwatts. Clip tiny or
+    # non-positive values to a conservative floor so the plot remains finite.
+    floor_power = 1.0e-20
+    return np.asarray(10.0 * np.log10(np.clip(plot_values, floor_power, None)), dtype=np.float64)
 
 
 def _format_timestamp_ms(
