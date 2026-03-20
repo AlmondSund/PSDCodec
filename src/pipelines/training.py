@@ -6,6 +6,7 @@ import contextlib
 import copy
 import json
 import os
+import random
 import shutil
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
@@ -87,6 +88,57 @@ def _require_torch() -> Any:
     if _torch is None or TorchDataLoader is None:
         raise ImportError("PyTorch is required to use pipelines.training.")
     return _torch
+
+
+def _resolve_training_random_seed(
+    experiment_config: TrainingExperimentConfig,  # Full experiment configuration
+) -> int:
+    """Resolve the RNG seed that controls model initialization and batch ordering.
+
+    Purpose:
+        Dataset splitting already has its own deterministic seed. Training needs a
+        second, explicit seed boundary so reruns with the same experiment config
+        produce comparable optimization traces instead of drifting due to model
+        initialization or DataLoader shuffle randomness.
+    """
+    configured_seed = experiment_config.training.random_seed
+    if configured_seed is not None:
+        return configured_seed
+    return experiment_config.dataset.seed
+
+
+def _seed_training_random_state(
+    seed: int,  # Process-wide RNG seed used for this training run
+) -> None:
+    """Seed Python, NumPy, and torch RNGs for reproducible training starts.
+
+    Side effects:
+        Mutates process-wide RNG state before model construction so that parameter
+        initialization, stochastic training helpers, and any future Python/NumPy
+        randomness start from the same seed on every rerun.
+
+    Trade-off:
+        This helper intentionally does not enable deterministic kernels globally.
+        Full deterministic algorithms would reduce accelerator throughput, while
+        simple seed control is sufficient to make experiment comparisons fair.
+    """
+    torch_module = _require_torch()
+    random.seed(seed)
+    np.random.seed(seed)
+    torch_module.manual_seed(seed)
+    if hasattr(torch_module, "cuda"):
+        torch_module.cuda.manual_seed_all(seed)
+
+
+def _seed_data_loader_worker(
+    worker_index: int,  # Worker id assigned by the DataLoader runtime
+) -> None:
+    """Seed per-worker Python and NumPy RNGs from PyTorch's worker-local seed."""
+    del worker_index  # The worker-local torch seed already encodes the worker identity.
+    torch_module = _require_torch()
+    worker_seed = int(torch_module.initial_seed() % (2**32))
+    random.seed(worker_seed)
+    np.random.seed(worker_seed)
 
 
 def _raise_if_non_finite_tensors(
@@ -188,6 +240,7 @@ class TrainingConfig:
     persistent_data_loader_workers: bool = (
         True  # Keep DataLoader workers alive across epochs when workers > 0
     )
+    random_seed: int | None = None  # Optional RNG seed for model init and mini-batch order
     loss: RateDistortionLossConfig = RateDistortionLossConfig()  # Lagrangian loss weights
 
     def __post_init__(self) -> None:
@@ -214,6 +267,8 @@ class TrainingConfig:
             )
         if self.prefetch_factor is not None and self.prefetch_factor <= 0:
             raise CodecConfigurationError("prefetch_factor must be strictly positive when set.")
+        if self.random_seed is not None and self.random_seed < 0:
+            raise CodecConfigurationError("random_seed must be non-negative when set.")
 
 
 @dataclass(frozen=True)
@@ -400,6 +455,8 @@ class TorchCodecTrainer:
         torch_module = _require_torch()
         self.experiment_config = experiment_config
         self.preprocessor = FramePreprocessor(experiment_config.runtime.preprocessing)
+        self._training_random_seed = _resolve_training_random_seed(experiment_config)
+        _seed_training_random_state(self._training_random_seed)
         self.training_device = _resolve_training_device_string(experiment_config.training.device)
         self._training_device_handle = torch_module.device(self.training_device)
         self._training_device_type = self._training_device_handle.type
@@ -515,6 +572,7 @@ class TorchCodecTrainer:
         """
         if TorchDataLoader is None:
             raise ImportError("PyTorch is required to construct training data loaders.")
+        torch_module = _require_torch()
         if training_dataset.original_bin_count != validation_dataset.original_bin_count:
             raise CodecConfigurationError(
                 "Training and validation datasets must share the same original frame length."
@@ -543,10 +601,15 @@ class TorchCodecTrainer:
                 else self.experiment_config.training.prefetch_factor
             )
             data_loader_kwargs["prefetch_factor"] = resolved_prefetch_factor
+            data_loader_kwargs["worker_init_fn"] = _seed_data_loader_worker
+
+        train_loader_generator = torch_module.Generator()
+        train_loader_generator.manual_seed(self._training_random_seed)
 
         train_loader: Any = TorchDataLoader(
             training_dataset,
             shuffle=self.experiment_config.dataset.shuffle,
+            generator=train_loader_generator,
             **data_loader_kwargs,
         )
         validation_loader: Any = TorchDataLoader(

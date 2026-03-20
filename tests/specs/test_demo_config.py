@@ -42,11 +42,15 @@ def test_demo_yaml_points_to_the_canonical_manuscript_run() -> None:
     assert config.model.convolution_kernel_size == 7
     assert config.training.device == "auto"
     assert config.training.batch_size == 128
+    assert config.training.random_seed == 0
     assert config.training.mixed_precision == "auto"
     assert config.training.enable_model_compile
     assert config.artifacts.latest_checkpoint_interval == 10
     assert config.task is not None
+    assert config.task.peak_weight == 1.0e-11
     assert config.task.peak_power_weight == 1.0
+    assert config.task.centroid_weight == 0.0
+    assert config.task.bandwidth_weight == 0.0
 
 
 def test_repo_keeps_one_single_demo_notebook() -> None:

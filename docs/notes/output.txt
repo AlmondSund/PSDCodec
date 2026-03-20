@@ -1,0 +1,476 @@
+(.venv) voxter@voxter:~/Code/PSDCodec$ python scripts/jobs/train_demo.py
+using_prepared_dataset_cache: /home/voxter/Code/PSDCodec/data/processed/demo_prepared_83c8c79e8b33.npz
+training_device_target: cuda
+epoch 1/100 complete | remaining_epochs=99 | train_loss=1.878681 | val_loss=0.856597 | current_validation_deployment_score=1.604563 | selection_candidate_accepted=no | best_validation_deployment_score=inf
+epoch 2/100 complete | remaining_epochs=98 | train_loss=0.853140 | val_loss=0.805065 | current_validation_deployment_score=1.497774 | selection_candidate_accepted=no | best_validation_deployment_score=inf
+epoch 3/100 complete | remaining_epochs=97 | train_loss=0.764264 | val_loss=0.719908 | current_validation_deployment_score=1.361127 | selection_candidate_accepted=no | best_validation_deployment_score=inf
+epoch 4/100 complete | remaining_epochs=96 | train_loss=0.688011 | val_loss=0.671477 | current_validation_deployment_score=1.266957 | selection_candidate_accepted=no | best_validation_deployment_score=inf
+epoch 5/100 complete | remaining_epochs=95 | train_loss=0.635080 | val_loss=0.594519 | current_validation_deployment_score=1.138099 | selection_candidate_accepted=no | best_validation_deployment_score=inf
+epoch 6/100 complete | remaining_epochs=94 | train_loss=0.592815 | val_loss=0.553921 | current_validation_deployment_score=1.117789 | selection_candidate_accepted=no | best_validation_deployment_score=inf
+epoch 7/100 complete | remaining_epochs=93 | train_loss=0.569183 | val_loss=0.538695 | current_validation_deployment_score=1.183693 | selection_candidate_accepted=no | best_validation_deployment_score=inf
+epoch 8/100 complete | remaining_epochs=92 | train_loss=0.534216 | val_loss=0.518438 | current_validation_deployment_score=1.084090 | selection_candidate_accepted=no | best_validation_deployment_score=inf
+epoch 9/100 complete | remaining_epochs=91 | train_loss=0.511632 | val_loss=0.513137 | current_validation_deployment_score=1.144589 | selection_candidate_accepted=no | best_validation_deployment_score=inf
+epoch 10/100 complete | remaining_epochs=90 | train_loss=0.483034 | val_loss=0.466679 | current_validation_deployment_score=1.022974 | selection_candidate_accepted=no | best_validation_deployment_score=inf
+epoch 11/100 complete | remaining_epochs=89 | train_loss=0.467734 | val_loss=0.463994 | current_validation_deployment_score=1.023950 | selection_candidate_accepted=no | best_validation_deployment_score=inf
+epoch 12/100 complete | remaining_epochs=88 | train_loss=0.450954 | val_loss=0.426407 | current_validation_deployment_score=1.005098 | selection_candidate_accepted=no | best_validation_deployment_score=inf
+epoch 13/100 complete | remaining_epochs=87 | train_loss=0.437070 | val_loss=0.426197 | current_validation_deployment_score=1.020450 | selection_candidate_accepted=no | best_validation_deployment_score=inf
+epoch 14/100 complete | remaining_epochs=86 | train_loss=0.431169 | val_loss=0.427149 | current_validation_deployment_score=1.023674 | selection_candidate_accepted=no | best_validation_deployment_score=inf
+epoch 15/100 complete | remaining_epochs=85 | train_loss=0.422055 | val_loss=0.435876 | current_validation_deployment_score=1.010445 | selection_candidate_accepted=no | best_validation_deployment_score=inf
+epoch 16/100 complete | remaining_epochs=84 | train_loss=0.409768 | val_loss=0.405108 | current_validation_deployment_score=0.991814 | selection_candidate_accepted=yes | best_validation_deployment_score=0.991814
+epoch 17/100 complete | remaining_epochs=83 | train_loss=0.397781 | val_loss=0.383800 | current_validation_deployment_score=0.919852 | selection_candidate_accepted=yes | best_validation_deployment_score=0.919852
+epoch 18/100 complete | remaining_epochs=82 | train_loss=0.385967 | val_loss=0.394597 | current_validation_deployment_score=0.990174 | selection_candidate_accepted=yes | best_validation_deployment_score=0.919852
+epoch 19/100 complete | remaining_epochs=81 | train_loss=0.382305 | val_loss=0.419007 | current_validation_deployment_score=1.001218 | selection_candidate_accepted=no | best_validation_deployment_score=0.919852
+epoch 20/100 complete | remaining_epochs=80 | train_loss=0.375066 | val_loss=0.370938 | current_validation_deployment_score=0.966962 | selection_candidate_accepted=yes | best_validation_deployment_score=0.919852
+epoch 21/100 complete | remaining_epochs=79 | train_loss=0.371608 | val_loss=0.378980 | current_validation_deployment_score=0.983009 | selection_candidate_accepted=yes | best_validation_deployment_score=0.919852
+epoch 22/100 complete | remaining_epochs=78 | train_loss=0.364371 | val_loss=0.377275 | current_validation_deployment_score=0.966328 | selection_candidate_accepted=yes | best_validation_deployment_score=0.919852
+epoch 23/100 complete | remaining_epochs=77 | train_loss=0.361731 | val_loss=0.358311 | current_validation_deployment_score=0.947461 | selection_candidate_accepted=yes | best_validation_deployment_score=0.919852
+epoch 24/100 complete | remaining_epochs=76 | train_loss=0.360546 | val_loss=0.356816 | current_validation_deployment_score=0.924728 | selection_candidate_accepted=yes | best_validation_deployment_score=0.919852
+epoch 25/100 complete | remaining_epochs=75 | train_loss=0.352776 | val_loss=0.360351 | current_validation_deployment_score=0.987574 | selection_candidate_accepted=yes | best_validation_deployment_score=0.919852
+epoch 26/100 complete | remaining_epochs=74 | train_loss=0.349832 | val_loss=0.355082 | current_validation_deployment_score=0.988923 | selection_candidate_accepted=yes | best_validation_deployment_score=0.919852
+epoch 27/100 complete | remaining_epochs=73 | train_loss=0.344457 | val_loss=0.342308 | current_validation_deployment_score=0.934795 | selection_candidate_accepted=yes | best_validation_deployment_score=0.919852
+epoch 28/100 complete | remaining_epochs=72 | train_loss=0.344306 | val_loss=0.340150 | current_validation_deployment_score=0.912577 | selection_candidate_accepted=yes | best_validation_deployment_score=0.912577
+epoch 29/100 complete | remaining_epochs=71 | train_loss=0.338980 | val_loss=0.353150 | current_validation_deployment_score=0.979408 | selection_candidate_accepted=yes | best_validation_deployment_score=0.912577
+epoch 30/100 complete | remaining_epochs=70 | train_loss=0.337731 | val_loss=0.333899 | current_validation_deployment_score=0.919104 | selection_candidate_accepted=yes | best_validation_deployment_score=0.912577
+epoch 31/100 complete | remaining_epochs=69 | train_loss=0.331208 | val_loss=0.335278 | current_validation_deployment_score=0.947391 | selection_candidate_accepted=yes | best_validation_deployment_score=0.912577
+epoch 32/100 complete | remaining_epochs=68 | train_loss=0.333891 | val_loss=0.324147 | current_validation_deployment_score=0.934223 | selection_candidate_accepted=yes | best_validation_deployment_score=0.912577
+epoch 33/100 complete | remaining_epochs=67 | train_loss=0.332036 | val_loss=0.327409 | current_validation_deployment_score=0.897038 | selection_candidate_accepted=yes | best_validation_deployment_score=0.897038
+epoch 34/100 complete | remaining_epochs=66 | train_loss=0.327245 | val_loss=0.327701 | current_validation_deployment_score=0.895475 | selection_candidate_accepted=yes | best_validation_deployment_score=0.895475
+epoch 35/100 complete | remaining_epochs=65 | train_loss=0.322100 | val_loss=0.329132 | current_validation_deployment_score=0.930247 | selection_candidate_accepted=yes | best_validation_deployment_score=0.895475
+epoch 36/100 complete | remaining_epochs=64 | train_loss=0.321824 | val_loss=0.317947 | current_validation_deployment_score=0.931177 | selection_candidate_accepted=yes | best_validation_deployment_score=0.895475
+epoch 37/100 complete | remaining_epochs=63 | train_loss=0.321064 | val_loss=0.318757 | current_validation_deployment_score=0.881962 | selection_candidate_accepted=yes | best_validation_deployment_score=0.881962
+epoch 38/100 complete | remaining_epochs=62 | train_loss=0.312057 | val_loss=0.323622 | current_validation_deployment_score=0.886561 | selection_candidate_accepted=yes | best_validation_deployment_score=0.881962
+epoch 39/100 complete | remaining_epochs=61 | train_loss=0.311061 | val_loss=0.325093 | current_validation_deployment_score=0.856180 | selection_candidate_accepted=yes | best_validation_deployment_score=0.856180
+epoch 40/100 complete | remaining_epochs=60 | train_loss=0.307959 | val_loss=0.308169 | current_validation_deployment_score=0.897360 | selection_candidate_accepted=yes | best_validation_deployment_score=0.856180
+epoch 41/100 complete | remaining_epochs=59 | train_loss=0.309686 | val_loss=0.308160 | current_validation_deployment_score=0.867932 | selection_candidate_accepted=yes | best_validation_deployment_score=0.856180
+epoch 42/100 complete | remaining_epochs=58 | train_loss=0.306711 | val_loss=0.300759 | current_validation_deployment_score=0.888731 | selection_candidate_accepted=yes | best_validation_deployment_score=0.856180
+epoch 43/100 complete | remaining_epochs=57 | train_loss=0.307072 | val_loss=0.317944 | current_validation_deployment_score=0.879961 | selection_candidate_accepted=yes | best_validation_deployment_score=0.856180
+epoch 44/100 complete | remaining_epochs=56 | train_loss=0.300806 | val_loss=0.312673 | current_validation_deployment_score=0.954723 | selection_candidate_accepted=yes | best_validation_deployment_score=0.856180
+epoch 45/100 complete | remaining_epochs=55 | train_loss=0.299031 | val_loss=0.297608 | current_validation_deployment_score=0.885669 | selection_candidate_accepted=yes | best_validation_deployment_score=0.856180
+epoch 46/100 complete | remaining_epochs=54 | train_loss=0.297705 | val_loss=0.301871 | current_validation_deployment_score=0.892279 | selection_candidate_accepted=yes | best_validation_deployment_score=0.856180
+epoch 47/100 complete | remaining_epochs=53 | train_loss=0.297723 | val_loss=0.301331 | current_validation_deployment_score=0.877935 | selection_candidate_accepted=yes | best_validation_deployment_score=0.856180
+epoch 48/100 complete | remaining_epochs=52 | train_loss=0.296135 | val_loss=0.302076 | current_validation_deployment_score=0.888253 | selection_candidate_accepted=yes | best_validation_deployment_score=0.856180
+epoch 49/100 complete | remaining_epochs=51 | train_loss=0.294869 | val_loss=0.293892 | current_validation_deployment_score=0.887059 | selection_candidate_accepted=yes | best_validation_deployment_score=0.856180
+epoch 50/100 complete | remaining_epochs=50 | train_loss=0.297279 | val_loss=0.294292 | current_validation_deployment_score=0.897487 | selection_candidate_accepted=yes | best_validation_deployment_score=0.856180
+epoch 51/100 complete | remaining_epochs=49 | train_loss=0.292355 | val_loss=0.300127 | current_validation_deployment_score=0.864980 | selection_candidate_accepted=yes | best_validation_deployment_score=0.856180
+epoch 52/100 complete | remaining_epochs=48 | train_loss=0.292052 | val_loss=0.299789 | current_validation_deployment_score=0.904658 | selection_candidate_accepted=yes | best_validation_deployment_score=0.856180
+epoch 53/100 complete | remaining_epochs=47 | train_loss=0.290498 | val_loss=0.289037 | current_validation_deployment_score=0.885255 | selection_candidate_accepted=yes | best_validation_deployment_score=0.856180
+epoch 54/100 complete | remaining_epochs=46 | train_loss=0.287788 | val_loss=0.293486 | current_validation_deployment_score=0.863071 | selection_candidate_accepted=yes | best_validation_deployment_score=0.856180
+epoch 55/100 complete | remaining_epochs=45 | train_loss=0.287257 | val_loss=0.282404 | current_validation_deployment_score=0.888277 | selection_candidate_accepted=yes | best_validation_deployment_score=0.856180
+epoch 56/100 complete | remaining_epochs=44 | train_loss=0.283231 | val_loss=0.286932 | current_validation_deployment_score=0.904268 | selection_candidate_accepted=yes | best_validation_deployment_score=0.856180
+epoch 57/100 complete | remaining_epochs=43 | train_loss=0.283158 | val_loss=0.286778 | current_validation_deployment_score=0.896064 | selection_candidate_accepted=yes | best_validation_deployment_score=0.856180
+epoch 58/100 complete | remaining_epochs=42 | train_loss=0.280926 | val_loss=0.281103 | current_validation_deployment_score=0.869606 | selection_candidate_accepted=yes | best_validation_deployment_score=0.856180
+epoch 59/100 complete | remaining_epochs=41 | train_loss=0.282301 | val_loss=0.286166 | current_validation_deployment_score=0.851741 | selection_candidate_accepted=yes | best_validation_deployment_score=0.851741
+epoch 60/100 complete | remaining_epochs=40 | train_loss=0.279151 | val_loss=0.278872 | current_validation_deployment_score=0.862775 | selection_candidate_accepted=yes | best_validation_deployment_score=0.851741
+epoch 61/100 complete | remaining_epochs=39 | train_loss=0.277751 | val_loss=0.280904 | current_validation_deployment_score=0.866909 | selection_candidate_accepted=yes | best_validation_deployment_score=0.851741
+epoch 62/100 complete | remaining_epochs=38 | train_loss=0.276939 | val_loss=0.282921 | current_validation_deployment_score=0.883506 | selection_candidate_accepted=yes | best_validation_deployment_score=0.851741
+epoch 63/100 complete | remaining_epochs=37 | train_loss=0.276391 | val_loss=0.279468 | current_validation_deployment_score=0.914928 | selection_candidate_accepted=yes | best_validation_deployment_score=0.851741
+epoch 64/100 complete | remaining_epochs=36 | train_loss=0.275315 | val_loss=0.277273 | current_validation_deployment_score=0.853021 | selection_candidate_accepted=yes | best_validation_deployment_score=0.851741
+epoch 65/100 complete | remaining_epochs=35 | train_loss=0.272614 | val_loss=0.278696 | current_validation_deployment_score=0.887791 | selection_candidate_accepted=yes | best_validation_deployment_score=0.851741
+epoch 66/100 complete | remaining_epochs=34 | train_loss=0.280141 | val_loss=0.273629 | current_validation_deployment_score=0.869979 | selection_candidate_accepted=yes | best_validation_deployment_score=0.851741
+epoch 67/100 complete | remaining_epochs=33 | train_loss=0.273618 | val_loss=0.283985 | current_validation_deployment_score=0.884665 | selection_candidate_accepted=yes | best_validation_deployment_score=0.851741
+epoch 68/100 complete | remaining_epochs=32 | train_loss=0.270838 | val_loss=0.273486 | current_validation_deployment_score=0.851880 | selection_candidate_accepted=yes | best_validation_deployment_score=0.851741
+epoch 69/100 complete | remaining_epochs=31 | train_loss=0.268994 | val_loss=0.274727 | current_validation_deployment_score=0.854398 | selection_candidate_accepted=yes | best_validation_deployment_score=0.851741
+epoch 70/100 complete | remaining_epochs=30 | train_loss=0.270948 | val_loss=0.272725 | current_validation_deployment_score=0.909538 | selection_candidate_accepted=yes | best_validation_deployment_score=0.851741
+epoch 71/100 complete | remaining_epochs=29 | train_loss=0.268376 | val_loss=0.270390 | current_validation_deployment_score=0.891277 | selection_candidate_accepted=yes | best_validation_deployment_score=0.851741
+epoch 72/100 complete | remaining_epochs=28 | train_loss=0.268901 | val_loss=0.269226 | current_validation_deployment_score=0.867093 | selection_candidate_accepted=yes | best_validation_deployment_score=0.851741
+epoch 73/100 complete | remaining_epochs=27 | train_loss=0.270845 | val_loss=0.281602 | current_validation_deployment_score=0.865577 | selection_candidate_accepted=yes | best_validation_deployment_score=0.851741
+epoch 74/100 complete | remaining_epochs=26 | train_loss=0.268670 | val_loss=0.268468 | current_validation_deployment_score=0.878752 | selection_candidate_accepted=yes | best_validation_deployment_score=0.851741
+epoch 75/100 complete | remaining_epochs=25 | train_loss=0.264484 | val_loss=0.268391 | current_validation_deployment_score=0.862134 | selection_candidate_accepted=yes | best_validation_deployment_score=0.851741
+epoch 76/100 complete | remaining_epochs=24 | train_loss=0.266548 | val_loss=0.269121 | current_validation_deployment_score=0.896359 | selection_candidate_accepted=yes | best_validation_deployment_score=0.851741
+epoch 77/100 complete | remaining_epochs=23 | train_loss=0.264301 | val_loss=0.267625 | current_validation_deployment_score=0.828894 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 78/100 complete | remaining_epochs=22 | train_loss=0.265299 | val_loss=0.270154 | current_validation_deployment_score=0.907698 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 79/100 complete | remaining_epochs=21 | train_loss=0.264730 | val_loss=0.267655 | current_validation_deployment_score=0.868013 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 80/100 complete | remaining_epochs=20 | train_loss=0.262116 | val_loss=0.265817 | current_validation_deployment_score=0.854745 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 81/100 complete | remaining_epochs=19 | train_loss=0.261008 | val_loss=0.268845 | current_validation_deployment_score=0.837804 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 82/100 complete | remaining_epochs=18 | train_loss=0.262496 | val_loss=0.263434 | current_validation_deployment_score=0.868433 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 83/100 complete | remaining_epochs=17 | train_loss=0.261519 | val_loss=0.266424 | current_validation_deployment_score=0.882933 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 84/100 complete | remaining_epochs=16 | train_loss=0.262280 | val_loss=0.268885 | current_validation_deployment_score=0.873060 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 85/100 complete | remaining_epochs=15 | train_loss=0.260488 | val_loss=0.261399 | current_validation_deployment_score=0.909550 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 86/100 complete | remaining_epochs=14 | train_loss=0.258476 | val_loss=0.264079 | current_validation_deployment_score=0.847113 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 87/100 complete | remaining_epochs=13 | train_loss=0.257776 | val_loss=0.256790 | current_validation_deployment_score=0.855606 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 88/100 complete | remaining_epochs=12 | train_loss=0.257728 | val_loss=0.256637 | current_validation_deployment_score=0.842209 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 89/100 complete | remaining_epochs=11 | train_loss=0.261465 | val_loss=0.262142 | current_validation_deployment_score=0.848200 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 90/100 complete | remaining_epochs=10 | train_loss=0.256239 | val_loss=0.259406 | current_validation_deployment_score=0.836071 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 91/100 complete | remaining_epochs=9 | train_loss=0.256258 | val_loss=0.260391 | current_validation_deployment_score=0.838546 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 92/100 complete | remaining_epochs=8 | train_loss=0.256450 | val_loss=0.258466 | current_validation_deployment_score=0.896796 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 93/100 complete | remaining_epochs=7 | train_loss=0.256434 | val_loss=0.258143 | current_validation_deployment_score=0.870548 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 94/100 complete | remaining_epochs=6 | train_loss=0.255169 | val_loss=0.255997 | current_validation_deployment_score=0.853914 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 95/100 complete | remaining_epochs=5 | train_loss=0.256372 | val_loss=0.272191 | current_validation_deployment_score=0.930539 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 96/100 complete | remaining_epochs=4 | train_loss=0.257672 | val_loss=0.262040 | current_validation_deployment_score=0.893787 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 97/100 complete | remaining_epochs=3 | train_loss=0.255336 | val_loss=0.256282 | current_validation_deployment_score=0.855091 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 98/100 complete | remaining_epochs=2 | train_loss=0.251558 | val_loss=0.267526 | current_validation_deployment_score=0.916492 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 99/100 complete | remaining_epochs=1 | train_loss=0.254460 | val_loss=0.262322 | current_validation_deployment_score=0.882122 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+epoch 100/100 complete | remaining_epochs=0 | train_loss=0.253052 | val_loss=0.251081 | current_validation_deployment_score=0.868274 | selection_candidate_accepted=yes | best_validation_deployment_score=0.828894
+W0320 03:54:30.491000 360316 torch/onnx/_internal/exporter/_compat.py:125] Setting ONNX exporter to use operator set version 18 because the requested opset_version 17 is a lower version than we have implementations for. Automatic version conversion will be performed, which may not be successful at converting to the requested version. If version conversion is unsuccessful, the opset version of the exported model will be kept at 18. Please consider setting opset_version >=18 to leverage latest ONNX features
+W0320 03:54:30.980000 360316 torch/onnx/_internal/exporter/_registration.py:110] torchvision is not installed. Skipping torchvision::nms
+W0320 03:54:30.980000 360316 torch/onnx/_internal/exporter/_registration.py:110] torchvision is not installed. Skipping torchvision::roi_align
+W0320 03:54:30.980000 360316 torch/onnx/_internal/exporter/_registration.py:110] torchvision is not installed. Skipping torchvision::roi_pool
+[torch.onnx] Obtain model graph for `TorchSpectralEncoder([...]` with `torch.export.export(..., strict=False)`...
+[torch.onnx] Obtain model graph for `TorchSpectralEncoder([...]` with `torch.export.export(..., strict=False)`... ❌
+[torch.onnx] Obtain model graph for `TorchSpectralEncoder([...]` with `torch.export.export(..., strict=True)`...
+E0320 03:54:31.753000 360316 torch/export/_trace.py:1250] always_classified is unsupported.
+E0320 03:54:31.754000 360316 torch/export/_trace.py:1250] always_classified is unsupported.
+[torch.onnx] Obtain model graph for `TorchSpectralEncoder([...]` with `torch.export.export(..., strict=True)`... ❌
+Traceback (most recent call last):
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/onnx/_internal/exporter/_capture_strategies.py", line 121, in __call__
+    exported_program = self._capture(model, args, kwargs, dynamic_shapes)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/onnx/_internal/exporter/_capture_strategies.py", line 219, in _capture
+    return torch.export.export(
+           ~~~~~~~~~~~~~~~~~~~^
+        model,
+        ^^^^^^
+    ...<4 lines>...
+        prefer_deferred_runtime_asserts_over_guards=_flags.PREFER_DEFERRED_RUNTIME_ASSERTS_OVER_GUARDS,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/export/__init__.py", line 311, in export
+    raise e
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/export/__init__.py", line 277, in export
+    return _export(
+        mod,
+    ...<6 lines>...
+        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+    )
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/export/_trace.py", line 1271, in wrapper
+    raise e
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/export/_trace.py", line 1237, in wrapper
+    ep = fn(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/export/exported_program.py", line 124, in wrapper
+    return fn(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/export/_trace.py", line 2377, in _export
+    ep = _export_for_training(
+        mod,
+    ...<5 lines>...
+        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+    )
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/export/_trace.py", line 1271, in wrapper
+    raise e
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/export/_trace.py", line 1237, in wrapper
+    ep = fn(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/export/exported_program.py", line 124, in wrapper
+    return fn(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/export/_trace.py", line 2185, in _export_for_training
+    export_artifact = export_func(
+        mod=mod,
+    ...<6 lines>...
+        _to_aten_func=_export_to_aten_ir_make_fx,
+    )
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/export/_trace.py", line 2116, in _non_strict_export
+    aten_export_artifact = _to_aten_func(
+        patched_mod,
+    ...<5 lines>...
+        transform=_tuplify_outputs,
+    )
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/export/_trace.py", line 1904, in _export_to_aten_ir_make_fx
+    gm, graph_signature = transform(_make_fx_helper)(
+                          ~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        stack,
+        ^^^^^^
+    ...<3 lines>...
+        kwargs=fake_kwargs,
+        ^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/export/_trace.py", line 2034, in _aot_export_non_strict
+    gm, sig = aot_export(stack, wrapped_mod, args, kwargs=kwargs, **flags)
+              ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/export/_trace.py", line 1816, in _make_fx_helper
+    gm = make_fx(
+    ...<2 lines>...
+        pre_dispatch=True,
+    )(*flat_args)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/experimental/proxy_tensor.py", line 2701, in wrapped
+    return make_fx_tracer.trace(f, *args)
+           ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/experimental/proxy_tensor.py", line 2626, in trace
+    return self._trace_inner(f, *args)
+           ~~~~~~~~~~~~~~~~~^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/experimental/proxy_tensor.py", line 2588, in _trace_inner
+    t = dispatch_trace(
+        wrap_key(func, args, self.fx_tracer, self.pre_dispatch),
+        tracer=self.fx_tracer,
+        concrete_args=tuple(phs),
+    )
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_compile.py", line 54, in inner
+    return disable_fn(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_dynamo/eval_frame.py", line 1180, in _fn
+    return fn(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/experimental/proxy_tensor.py", line 1460, in dispatch_trace
+    graph = tracer.trace(root, concrete_args)  # type: ignore[arg-type]
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/experimental/proxy_tensor.py", line 2177, in trace
+    res = super().trace(root, concrete_args)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_dynamo/eval_frame.py", line 1180, in _fn
+    return fn(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/_symbolic_trace.py", line 879, in trace
+    (self.create_arg(fn(*args)),),
+                     ~~^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/experimental/proxy_tensor.py", line 1526, in wrapped
+    out = f(*tensors)  # type:ignore[call-arg]
+  File "<string>", line 1, in <lambda>
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/export/_trace.py", line 1703, in wrapped_fn
+    return tuple(flat_fn(*args))
+                 ~~~~~~~^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_functorch/_aot_autograd/utils.py", line 193, in flat_fn
+    tree_out = fn(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_functorch/_aot_autograd/graph_capture_wrappers.py", line 1377, in functional_call
+    out = mod(*args[params_len:], **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/_symbolic_trace.py", line 853, in module_call_wrapper
+    return self.call_module(mod, forward, args, kwargs)
+           ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/experimental/proxy_tensor.py", line 2264, in call_module
+    return Tracer.call_module(self, m, forward, args, kwargs)
+           ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/_symbolic_trace.py", line 569, in call_module
+    ret_val = forward(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/_symbolic_trace.py", line 846, in forward
+    return _orig_module_call(mod, *args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/export/_trace.py", line 2018, in forward
+    tree_out = mod(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/_symbolic_trace.py", line 853, in module_call_wrapper
+    return self.call_module(mod, forward, args, kwargs)
+           ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/experimental/proxy_tensor.py", line 2264, in call_module
+    return Tracer.call_module(self, m, forward, args, kwargs)
+           ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/_symbolic_trace.py", line 569, in call_module
+    ret_val = forward(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/_symbolic_trace.py", line 846, in forward
+    return _orig_module_call(mod, *args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/src/models/torch_backend.py", line 238, in forward
+    spectral_features = self.stem_residual_block(spectral_features)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/_symbolic_trace.py", line 853, in module_call_wrapper
+    return self.call_module(mod, forward, args, kwargs)
+           ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/experimental/proxy_tensor.py", line 2264, in call_module
+    return Tracer.call_module(self, m, forward, args, kwargs)
+           ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/_symbolic_trace.py", line 569, in call_module
+    ret_val = forward(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/_symbolic_trace.py", line 846, in forward
+    return _orig_module_call(mod, *args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/src/models/torch_backend.py", line 143, in forward
+    normalized = self.pre_norm(spectral_features)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/_symbolic_trace.py", line 853, in module_call_wrapper
+    return self.call_module(mod, forward, args, kwargs)
+           ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/experimental/proxy_tensor.py", line 2264, in call_module
+    return Tracer.call_module(self, m, forward, args, kwargs)
+           ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/_symbolic_trace.py", line 569, in call_module
+    ret_val = forward(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/_symbolic_trace.py", line 846, in forward
+    return _orig_module_call(mod, *args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1776, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/nn/modules/module.py", line 1787, in _call_impl
+    return forward_call(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/nn/modules/normalization.py", line 327, in forward
+    return F.group_norm(input, self.num_groups, self.weight, self.bias, self.eps)
+           ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/nn/functional.py", line 2969, in group_norm
+    return handle_torch_function(
+        group_norm,
+    ...<9 lines>...
+        eps=eps,
+    )
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/overrides.py", line 1740, in handle_torch_function
+    result = mode.__torch_function__(public_api, types, args, kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/experimental/proxy_tensor.py", line 1577, in __torch_function__
+    return func(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/nn/functional.py", line 2969, in group_norm
+    return handle_torch_function(
+        group_norm,
+    ...<9 lines>...
+        eps=eps,
+    )
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/overrides.py", line 1740, in handle_torch_function
+    result = mode.__torch_function__(public_api, types, args, kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/experimental/proxy_tensor.py", line 1648, in __torch_function__
+    return func(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/nn/functional.py", line 2969, in group_norm
+    return handle_torch_function(
+        group_norm,
+    ...<9 lines>...
+        eps=eps,
+    )
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/overrides.py", line 1740, in handle_torch_function
+    result = mode.__torch_function__(public_api, types, args, kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_export/non_strict_utils.py", line 1139, in __torch_function__
+    return func(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/nn/functional.py", line 2990, in group_norm
+    return torch.group_norm(
+           ~~~~~~~~~~~~~~~~^
+        input, num_groups, weight, bias, eps, torch.backends.cudnn.enabled
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_ops.py", line 940, in handler
+    return torch._library.utils.handle_dispatch_mode(
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        curr_mode, self, *args, **kwargs
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_library/utils.py", line 313, in handle_dispatch_mode
+    return curr_mode.__torch_dispatch__(op_overload, overload_types, args, kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/utils/_stats.py", line 29, in wrapper
+    return fn(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/experimental/proxy_tensor.py", line 1703, in __torch_dispatch__
+    return proxy_call(self, func, self.pre_dispatch, args, kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/fx/experimental/proxy_tensor.py", line 1145, in proxy_call
+    out = func(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_ops.py", line 819, in __call__
+    return self._op(*args, **kwargs)
+           ~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/utils/_stats.py", line 29, in wrapper
+    return fn(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_subclasses/fake_tensor.py", line 1397, in __torch_dispatch__
+    return self.dispatch(func, types, args, kwargs)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_subclasses/fake_tensor.py", line 2155, in dispatch
+    return self._cached_dispatch_impl(func, types, args, kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_subclasses/fake_tensor.py", line 1544, in _cached_dispatch_impl
+    output = self._dispatch_impl(func, types, args, kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_subclasses/fake_tensor.py", line 2707, in _dispatch_impl
+    decomposition_table[func](*args, **kwargs)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_refs/__init__.py", line 3342, in native_group_norm
+    w = rstd * weight_reshaped
+        ~~~~~^~~~~~~~~~~~~~~~~
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/utils/_stats.py", line 29, in wrapper
+    return fn(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_subclasses/fake_tensor.py", line 1397, in __torch_dispatch__
+    return self.dispatch(func, types, args, kwargs)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_subclasses/fake_tensor.py", line 2155, in dispatch
+    return self._cached_dispatch_impl(func, types, args, kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_subclasses/fake_tensor.py", line 1544, in _cached_dispatch_impl
+    output = self._dispatch_impl(func, types, args, kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_subclasses/fake_tensor.py", line 2681, in _dispatch_impl
+    return maybe_propagate_real_tensors(fast_impl(self, *args, **kwargs))
+                                        ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_subclasses/fake_impls.py", line 1337, in fast_binary_impl
+    return slow("both tensors nontrivially broadcast")
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_subclasses/fake_impls.py", line 1297, in slow
+    return slow_ref(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_prims_common/wrappers.py", line 315, in _fn
+    result = fn(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_compile.py", line 54, in inner
+    return disable_fn(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_dynamo/eval_frame.py", line 1180, in _fn
+    return fn(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_prims_common/wrappers.py", line 152, in _fn
+    result = fn(**bound.arguments)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_refs/__init__.py", line 1165, in _ref
+    output = prim(a, b)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_refs/__init__.py", line 1781, in mul
+    return prims.mul(a, b)
+           ~~~~~~~~~^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_ops.py", line 819, in __call__
+    return self._op(*args, **kwargs)
+           ~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/utils/_stats.py", line 29, in wrapper
+    return fn(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_subclasses/fake_tensor.py", line 1397, in __torch_dispatch__
+    return self.dispatch(func, types, args, kwargs)
+           ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_subclasses/fake_tensor.py", line 2155, in dispatch
+    return self._cached_dispatch_impl(func, types, args, kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_subclasses/fake_tensor.py", line 1544, in _cached_dispatch_impl
+    output = self._dispatch_impl(func, types, args, kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_subclasses/fake_tensor.py", line 2729, in _dispatch_impl
+    func.prim_meta_impl(*args, **kwargs)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_prims/__init__.py", line 405, in _prim_elementwise_meta
+    utils.check_same_device(*args_, allow_cpu_scalar_tensors=True)
+    ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/_prims_common/__init__.py", line 895, in check_same_device
+    raise RuntimeError(msg)
+RuntimeError: Tensor on device cuda:0 is not on the expected device cpu!
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/home/voxter/Code/PSDCodec/scripts/jobs/train_demo.py", line 253, in <module>
+    raise SystemExit(main())
+                     ~~~~^^
+  File "/home/voxter/Code/PSDCodec/scripts/jobs/train_demo.py", line 234, in main
+    summary = run_training_experiment(
+        experiment_config,
+        source_config_path=args.config,
+        progress_reporter=_print_epoch_progress,
+    )
+  File "/home/voxter/Code/PSDCodec/src/pipelines/training.py", line 1234, in run_training_experiment
+    return trainer.fit(
+           ~~~~~~~~~~~^
+        training_dataset,
+        ^^^^^^^^^^^^^^^^^
+    ...<2 lines>...
+        progress_reporter=progress_reporter,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/voxter/Code/PSDCodec/src/pipelines/training.py", line 810, in fit
+    self.model.export_encoder_to_onnx(onnx_path)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^
+  File "/home/voxter/Code/PSDCodec/src/models/torch_backend.py", line 460, in export_encoder_to_onnx
+    onnx_program = torch.onnx.export(
+        self.encoder,
+    ...<8 lines>...
+        dynamic_shapes=({0: batch_dim},),
+    )
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/onnx/__init__.py", line 296, in export
+    return _compat.export_compat(
+           ~~~~~~~~~~~~~~~~~~~~~^
+        model,
+        ^^^^^^
+    ...<20 lines>...
+        legacy_export_kwargs=legacy_export_kwargs,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/onnx/_internal/exporter/_compat.py", line 154, in export_compat
+    onnx_program = _core.export(
+        model,
+    ...<11 lines>...
+        verbose=verbose,
+    )
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/onnx/_internal/exporter/_flags.py", line 27, in wrapper
+    return func(*args, **kwargs)
+  File "/home/voxter/Code/PSDCodec/.venv/lib/python3.13/site-packages/torch/onnx/_internal/exporter/_core.py", line 1409, in export
+    raise _errors.TorchExportError(
+    ...<7 lines>...
+    ) from first_error
+torch.onnx._internal.exporter._errors.TorchExportError: Failed to export the model with torch.export. This is step 1/3 of exporting the model to ONNX. Next steps:
+- Modify the model code for `torch.export.export` to succeed. Refer to https://pytorch.org/docs/stable/generated/exportdb/index.html for more information.
+- Debug `torch.export.export` and submit a PR to PyTorch.
+- Create an issue in the PyTorch GitHub repository against the *torch.export* component and attach the full error stack as well as reproduction scripts.
+
+## Exception summary
+
+<class 'RuntimeError'>: Tensor on device cuda:0 is not on the expected device cpu!
+
+(Refer to the full stack trace above for more information.)
+(.venv) voxter@voxter:~/Code/PSDCodec$ 
+

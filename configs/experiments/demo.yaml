@@ -74,6 +74,7 @@ training:
   # canonical demo now shifts those weights toward reconstruction quality.
   epoch_count: 100
   batch_size: 128
+  random_seed: 0
   learning_rate: 2.0e-4
   weight_decay: 1.0e-5
   gradient_clip_norm: 1.0
@@ -110,18 +111,22 @@ artifacts:
 task:
   # Manuscript example: occupancy consistency + feature preservation.
   # These values are in linear-power units, derived from observed campaign frame and
-  # noise-floor deltas rather than from dB magnitudes. The feature balance now
-  # explicitly favors dominant-peak preservation over occupied-bandwidth smoothness,
-  # because deployment quality was failing mainly through peak swapping.
+  # noise-floor deltas rather than from dB magnitudes. The current deterministic
+  # demo runs still fail mainly through dominant-peak swaps and excess PSD blur,
+  # not through centroid or occupied-bandwidth drift. The canonical demo therefore
+  # keeps occupancy and dominant-peak preservation active, but drops the centroid
+  # and bandwidth feature terms until the learned stage can first beat the
+  # preprocessing-only baseline on the metrics that the deployment score actually
+  # penalizes directly.
   occupancy_margin: 5.0e-6
   occupancy_temperature: 2.5e-6
   occupancy_positive_weight: 2.0
   occupancy_negative_weight: 1.0
   smoothing_window_bins: 5
   huber_delta: 100000.0
-  peak_weight: 5.0e-12
+  peak_weight: 1.0e-11
   peak_power_weight: 1.0
-  centroid_weight: 1.0e-12
-  bandwidth_weight: 1.5e-10
+  centroid_weight: 0.0
+  bandwidth_weight: 0.0
   occupancy_weight: 0.5
   feature_weight: 2.0

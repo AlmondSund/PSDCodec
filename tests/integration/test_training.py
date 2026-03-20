@@ -29,6 +29,7 @@ from pipelines.training import (
     TorchCodecTrainer,
     TrainingConfig,
     TrainingExperimentConfig,
+    TrainingSummary,
     _compose_validation_deployment_score,
     _selection_candidate_is_acceptable,
     load_training_checkpoint,
@@ -159,6 +160,7 @@ def _write_tiny_dataset(dataset_path: Path) -> None:
 def _make_experiment_config(tmp_path: Path, *, export_onnx: bool) -> TrainingExperimentConfig:
     """Create a small CPU-only experiment configuration for smoke tests."""
     dataset_path = tmp_path / "toy_dataset.npz"
+    dataset_path.parent.mkdir(parents=True, exist_ok=True)
     _write_tiny_dataset(dataset_path)
     return TrainingExperimentConfig(
         dataset=DatasetConfig(
@@ -190,6 +192,7 @@ def _make_experiment_config(tmp_path: Path, *, export_onnx: bool) -> TrainingExp
         training=TrainingConfig(
             epoch_count=2,
             batch_size=2,
+            random_seed=11,
             learning_rate=5.0e-3,
             weight_decay=0.0,
             gradient_clip_norm=1.0,
@@ -209,6 +212,27 @@ def _make_experiment_config(tmp_path: Path, *, export_onnx: bool) -> TrainingExp
         ),
         task=IllustrativeTaskConfig(occupancy_margin=0.2, smoothing_window_bins=3),
     )
+
+
+def _epoch_history_signature(
+    summary: TrainingSummary,  # Completed training summary to compare deterministically
+) -> list[tuple[float, ...]]:
+    """Project epoch metrics onto a stable numeric signature for reproducibility tests."""
+    return [
+        (
+            epoch.training_loss,
+            epoch.validation_loss,
+            epoch.training_psd_loss,
+            epoch.validation_psd_loss,
+            epoch.training_rate_bits,
+            epoch.validation_rate_bits,
+            epoch.training_vq_loss,
+            epoch.validation_vq_loss,
+            epoch.training_task_loss,
+            epoch.validation_task_loss,
+        )
+        for epoch in summary.history
+    ]
 
 
 def test_training_smoke_saves_checkpoint_and_runtime_assets(tmp_path: Path) -> None:
@@ -345,6 +369,27 @@ def test_training_reports_epoch_progress_updates(tmp_path: Path) -> None:
     assert updates[-1].completed_epoch_count == experiment_config.training.epoch_count
     assert updates[-1].best_selection_score == pytest.approx(summary.best_selection_score)
     assert updates[-1].best_validation_loss == pytest.approx(summary.best_validation_loss)
+
+
+def test_training_seed_reproduces_tiny_histories(tmp_path: Path) -> None:
+    """Two tiny runs with the same training seed should follow the same optimization path."""
+    first_config = _make_experiment_config(tmp_path / "run_a", export_onnx=False)
+    second_config = _make_experiment_config(tmp_path / "run_b", export_onnx=False)
+
+    first_trainer = TorchCodecTrainer(first_config)
+    first_training_dataset, first_validation_dataset = first_trainer.load_prepared_datasets()
+    first_summary = first_trainer.fit(first_training_dataset, first_validation_dataset)
+
+    second_trainer = TorchCodecTrainer(second_config)
+    second_training_dataset, second_validation_dataset = second_trainer.load_prepared_datasets()
+    second_summary = second_trainer.fit(second_training_dataset, second_validation_dataset)
+
+    assert _epoch_history_signature(first_summary) == pytest.approx(
+        _epoch_history_signature(second_summary)
+    )
+    assert first_summary.best_epoch_index == second_summary.best_epoch_index
+    assert first_summary.best_selection_score == pytest.approx(second_summary.best_selection_score)
+    assert first_summary.best_validation_loss == pytest.approx(second_summary.best_validation_loss)
 
 
 def test_resolve_accelerator_training_device_rejects_cpu_fallback(

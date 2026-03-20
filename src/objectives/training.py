@@ -24,6 +24,11 @@ if TYPE_CHECKING:
 else:
     Tensor = Any
 
+# The differentiable peak surrogate should stay sharp enough to guide dominant
+# frequency alignment, but still smooth enough to keep training stable on the
+# demo campaigns. A more aggressive temperature regressed the best validation
+# deployment score in practice, so the canonical objective keeps this more
+# conservative value.
 _PEAK_SOFTMAX_TEMPERATURE: float = 0.10
 
 
