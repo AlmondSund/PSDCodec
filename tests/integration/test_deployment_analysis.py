@@ -99,17 +99,11 @@ def test_campaign_frame_loading_falls_back_to_source_sidecar_for_npz_exports(
         Notebook batch analysis still needs the original raw campaign root. This
         regression test keeps that fallback explicit.
     """
-    export_dir = (
-        trained_demo_artifacts.project_root / "models" / "exports" / "demo_npz_sidecar"
-    )
+    export_dir = trained_demo_artifacts.project_root / "models" / "exports" / "demo_npz_sidecar"
     export_dir.mkdir(parents=True, exist_ok=True)
 
     checkpoint_path = (
-        trained_demo_artifacts.project_root
-        / "models"
-        / "checkpoints"
-        / "demo"
-        / "best.pt"
+        trained_demo_artifacts.project_root / "models" / "checkpoints" / "demo" / "best.pt"
     )
     loaded_checkpoint = load_training_checkpoint(checkpoint_path)
     source_config = loaded_checkpoint.experiment_config

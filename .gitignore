@@ -5,3 +5,13 @@ __pycache__/
 .ruff_cache/
 .pip-tmp/
 .venv/
+*.egg-info/
+
+# Generated prepared datasets and deployment/training artifacts are reproducible
+# outputs, not versioned source.
+data/processed/*.npz
+!data/processed/.gitkeep
+models/checkpoints/*
+!models/checkpoints/.gitkeep
+models/exports/*
+!models/exports/.gitkeep

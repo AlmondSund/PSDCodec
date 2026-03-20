@@ -193,9 +193,7 @@ def _prepared_dataset_cache_is_stale(
         return True
     cache_mtime_ns = cache_path.stat().st_mtime_ns
     latest_campaign_mtime_ns = max(
-        path.stat().st_mtime_ns
-        for path in campaign_root.rglob("*")
-        if path.is_file()
+        path.stat().st_mtime_ns for path in campaign_root.rglob("*") if path.is_file()
     )
     return latest_campaign_mtime_ns > cache_mtime_ns
 

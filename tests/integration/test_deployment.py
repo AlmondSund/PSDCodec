@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 import pytest
 
@@ -11,7 +13,7 @@ pytest.importorskip("onnxruntime")
 
 
 def test_exported_demo_can_run_the_deployment_round_trip(
-    trained_demo_artifacts,
+    trained_demo_artifacts: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The exported demo artifacts should encode and decode one campaign frame."""

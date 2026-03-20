@@ -97,6 +97,7 @@ def test_prepared_dataset_npz_round_trip_reuses_precomputed_arrays(tmp_path: Pat
     assert loaded.noise_floors.dtype == np.float32
     assert loaded.frequency_grid_hz is not None
     assert loaded.frequency_grid_hz.dtype == np.float64
+    assert dataset.noise_floors is not None
     np.testing.assert_allclose(loaded.original_frames, dataset.original_frames)
     np.testing.assert_allclose(loaded.normalized_frames, dataset.normalized_frames)
     np.testing.assert_allclose(loaded.side_means, dataset.side_means)

@@ -105,7 +105,6 @@ if torch is not None:
         bound = float(embedding_dim) ** -0.5
         nn.init.uniform_(codebook, -bound, bound)
 
-
     class TorchResidualConvBlock(nn.Module):
         """Local residual block that preserves neighborhood structure in PSD space."""
 
@@ -353,8 +352,10 @@ if torch is not None:
             codebook_fp32 = self.codebook.to(dtype=torch.float32)
             latent_norms = torch.sum(flat_latents_fp32 * flat_latents_fp32, dim=1, keepdim=True)
             codebook_norms = torch.sum(codebook_fp32 * codebook_fp32, dim=1).unsqueeze(0)
-            distances = latent_norms + codebook_norms - 2.0 * (
-                flat_latents_fp32 @ codebook_fp32.transpose(0, 1)
+            distances = (
+                latent_norms
+                + codebook_norms
+                - 2.0 * (flat_latents_fp32 @ codebook_fp32.transpose(0, 1))
             )
             indices = torch.argmin(distances, dim=1)
             quantized = self.codebook[indices].reshape(

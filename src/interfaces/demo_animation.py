@@ -250,7 +250,7 @@ def create_deployment_animation(
             "Deployment Reconstruction Walkthrough"
             f" | frame {frame_report.frame_index}"
             f" | {frame_report.sequence_id}"
-            f" | { _format_timestamp_ms(frame_report.timestamp_ms) }",
+            f" | {_format_timestamp_ms(frame_report.timestamp_ms)}",
             loc="left",
         )
 
@@ -334,6 +334,4 @@ def _format_timestamp_ms(
     timestamp_ms: int,  # Milliseconds since the Unix epoch
 ) -> str:
     """Format campaign timestamps in a notebook-friendly UTC string."""
-    return datetime.fromtimestamp(timestamp_ms / 1_000.0, tz=UTC).strftime(
-        "%Y-%m-%d %H:%M:%S"
-    )
+    return datetime.fromtimestamp(timestamp_ms / 1_000.0, tz=UTC).strftime("%Y-%m-%d %H:%M:%S")

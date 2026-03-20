@@ -84,9 +84,7 @@ def _detach_scalar_values_to_host(
         hot path pays only one host transfer per batch.
     """
     torch_module = _require_torch()
-    detached_scalars = torch_module.stack(
-        [value.detach().reshape(()) for value in values]
-    )
+    detached_scalars = torch_module.stack([value.detach().reshape(()) for value in values])
     host_values = detached_scalars.to(device="cpu", dtype=torch_module.float64)
     return tuple(float(value) for value in host_values.tolist())
 
@@ -363,18 +361,24 @@ def _torch_extract_illustrative_features(
     occupied_center_hz = (
         torch_module.sum(occupied_weights * frequency_grid, dim=1) / safe_occupied_mass
     )
-    occupied_variance_hz2 = torch_module.sum(
-        occupied_weights * (frequency_grid - occupied_center_hz.unsqueeze(1)) ** 2,
-        dim=1,
-    ) / safe_occupied_mass
+    occupied_variance_hz2 = (
+        torch_module.sum(
+            occupied_weights * (frequency_grid - occupied_center_hz.unsqueeze(1)) ** 2,
+            dim=1,
+        )
+        / safe_occupied_mass
+    )
     # A plain `sqrt(12 * variance)` has an infinite derivative at zero variance,
     # which makes perfectly narrow single-bin occupancies produce NaN gradients.
     # The shifted square root preserves the zero-bandwidth fixed point while making
     # the local gradient finite and scaled to the dataset frequency resolution.
-    occupied_bandwidth_hz = torch_module.sqrt(
-        torch_module.clamp(12.0 * occupied_variance_hz2, min=0.0)
-        + bandwidth_stabilizer_hz * bandwidth_stabilizer_hz,
-    ) - bandwidth_stabilizer_hz
+    occupied_bandwidth_hz = (
+        torch_module.sqrt(
+            torch_module.clamp(12.0 * occupied_variance_hz2, min=0.0)
+            + bandwidth_stabilizer_hz * bandwidth_stabilizer_hz,
+        )
+        - bandwidth_stabilizer_hz
+    )
     occupied_bandwidth_hz = torch_module.clamp(
         occupied_bandwidth_hz,
         min=0.0,
@@ -410,13 +414,11 @@ def _torch_feature_preservation_loss(
         delta=config.huber_delta,
     )
     centroid_term = _torch_huber(
-        reference_features.spectral_centroid_hz
-        - reconstructed_features.spectral_centroid_hz,
+        reference_features.spectral_centroid_hz - reconstructed_features.spectral_centroid_hz,
         delta=config.huber_delta,
     )
     bandwidth_term = _torch_huber(
-        reference_features.occupied_bandwidth_hz
-        - reconstructed_features.occupied_bandwidth_hz,
+        reference_features.occupied_bandwidth_hz - reconstructed_features.occupied_bandwidth_hz,
         delta=config.huber_delta,
     )
     weighted = (

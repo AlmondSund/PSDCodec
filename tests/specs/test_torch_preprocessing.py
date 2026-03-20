@@ -48,20 +48,25 @@ def test_differentiable_inverse_preprocessing_matches_runtime_inverse() -> None:
         ],
         axis=0,
     )
-    reconstructed = inverse_preprocessor.inverse_preprocess_batch(
-        torch.as_tensor(
-            np.stack([artifact.normalized_frame for artifact in artifacts], axis=0),
-            dtype=torch.float32,
-        ),
-        torch.as_tensor(
-            np.stack([artifact.side_information.means for artifact in artifacts], axis=0),
-            dtype=torch.float32,
-        ),
-        torch.as_tensor(
-            np.stack([artifact.side_information.log_sigmas for artifact in artifacts], axis=0),
-            dtype=torch.float32,
-        ),
-    ).detach().cpu().numpy()
+    reconstructed = (
+        inverse_preprocessor.inverse_preprocess_batch(
+            torch.as_tensor(
+                np.stack([artifact.normalized_frame for artifact in artifacts], axis=0),
+                dtype=torch.float32,
+            ),
+            torch.as_tensor(
+                np.stack([artifact.side_information.means for artifact in artifacts], axis=0),
+                dtype=torch.float32,
+            ),
+            torch.as_tensor(
+                np.stack([artifact.side_information.log_sigmas for artifact in artifacts], axis=0),
+                dtype=torch.float32,
+            ),
+        )
+        .detach()
+        .cpu()
+        .numpy()
+    )
 
     np.testing.assert_allclose(reconstructed, expected, atol=1.0e-6)
 

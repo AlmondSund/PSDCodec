@@ -262,9 +262,7 @@ class TrainingConfig:
                 "mixed_precision must be one of {'auto', 'disabled', 'fp16', 'bf16'}."
             )
         if self.data_loader_worker_count is not None and self.data_loader_worker_count < 0:
-            raise CodecConfigurationError(
-                "data_loader_worker_count must be non-negative when set."
-            )
+            raise CodecConfigurationError("data_loader_worker_count must be non-negative when set.")
         if self.prefetch_factor is not None and self.prefetch_factor <= 0:
             raise CodecConfigurationError("prefetch_factor must be strictly positive when set.")
         if self.random_seed is not None and self.random_seed < 0:
@@ -291,8 +289,7 @@ class ArtifactConfig:
         """Validate artifact and checkpoint-selection settings."""
         if self.selection_metric not in _SELECTION_METRICS:
             raise CodecConfigurationError(
-                "selection_metric must be one of "
-                f"{sorted(_SELECTION_METRICS)}.",
+                f"selection_metric must be one of {sorted(_SELECTION_METRICS)}.",
             )
         if self.latest_checkpoint_interval <= 0:
             raise CodecConfigurationError("latest_checkpoint_interval must be strictly positive.")
@@ -575,8 +572,7 @@ def _copy_source_config_sidecar_if_present(
         return None
     destination_dir.mkdir(parents=True, exist_ok=True)
     destination = (
-        destination_dir
-        / f"{experiment_name}.source{source_config_path.suffix or '.yaml'}"
+        destination_dir / f"{experiment_name}.source{source_config_path.suffix or '.yaml'}"
     )
     shutil.copy2(source_config_path, destination)
     return destination
@@ -1012,14 +1008,9 @@ class TorchCodecTrainer:
                     )
 
             latest_checkpoint_path = checkpoint_dir / "latest.pt"
-            should_save_latest = (
-                self.experiment_config.artifacts.save_latest_checkpoint
-                and (
-                    (epoch_index + 1)
-                    % self.experiment_config.artifacts.latest_checkpoint_interval
-                    == 0
-                    or epoch_index + 1 == self.experiment_config.training.epoch_count
-                )
+            should_save_latest = self.experiment_config.artifacts.save_latest_checkpoint and (
+                (epoch_index + 1) % self.experiment_config.artifacts.latest_checkpoint_interval == 0
+                or epoch_index + 1 == self.experiment_config.training.epoch_count
             )
             if should_save_latest:
                 self._save_checkpoint(
@@ -1229,9 +1220,7 @@ class TorchCodecTrainer:
     ) -> Tensor:
         """Convert one contiguous NumPy batch into a torch tensor on the training device."""
         torch_module = _require_torch()
-        cpu_tensor = torch_module.from_numpy(
-            np.asarray(values, dtype=np.float32, order="C")
-        )
+        cpu_tensor = torch_module.from_numpy(np.asarray(values, dtype=np.float32, order="C"))
         if self._pin_memory and self._training_device_type == "cuda":
             cpu_tensor = cpu_tensor.pin_memory()
             return cast(
@@ -1568,9 +1557,7 @@ class _AggregatedMetrics:
             )
             self.peak_frequency_error_hz_count += batch_size
         if validation_diagnostics.peak_power_error_db is not None:
-            self.peak_power_error_db_sum += (
-                validation_diagnostics.peak_power_error_db * batch_size
-            )
+            self.peak_power_error_db_sum += validation_diagnostics.peak_power_error_db * batch_size
             self.peak_power_error_db_count += batch_size
 
     def finalize(self) -> _FinalizedMetrics:
@@ -1840,9 +1827,7 @@ def _resolve_autocast_dtype(
         return None
     if mixed_precision == "auto":
         return (
-            torch_module.bfloat16
-            if torch_module.cuda.is_bf16_supported()
-            else torch_module.float16
+            torch_module.bfloat16 if torch_module.cuda.is_bf16_supported() else torch_module.float16
         )
     if mixed_precision == "bf16":
         if not torch_module.cuda.is_bf16_supported():

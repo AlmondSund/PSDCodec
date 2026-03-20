@@ -145,9 +145,7 @@ class PreparedPsdDataset:
                     ),
                 )
             if preprocessor is None:
-                raise ValueError(
-                    "preprocessor is required when loading a raw PSD dataset archive."
-                )
+                raise ValueError("preprocessor is required when loading a raw PSD dataset archive.")
             frames = data[frames_key]
             frequency_grid = (
                 data[frequency_grid_key]

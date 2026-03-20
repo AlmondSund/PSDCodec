@@ -242,11 +242,14 @@ def hard_occupancy(
     config: IllustrativeTaskConfig,
 ) -> np.ndarray:
     """Compute the manuscript hard occupancy mask o_{t,n} for one PSD frame."""
-    return soft_occupancy(
-        frame,
-        noise_floor=noise_floor,
-        config=config,
-    ) >= 0.5
+    return (
+        soft_occupancy(
+            frame,
+            noise_floor=noise_floor,
+            config=config,
+        )
+        >= 0.5
+    )
 
 
 def extract_illustrative_features(
@@ -276,9 +279,7 @@ def extract_illustrative_features(
             "frame, frequency_grid_hz, and occupancy_mask must have the same shape."
         )
     if smoothing_window_bins <= 0 or smoothing_window_bins % 2 == 0:
-        raise CodecConfigurationError(
-            "smoothing_window_bins must be a positive odd integer."
-        )
+        raise CodecConfigurationError("smoothing_window_bins must be a positive odd integer.")
     return _extract_illustrative_features(
         candidate_frame,
         frequency_grid,

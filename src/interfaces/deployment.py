@@ -680,8 +680,7 @@ def load_campaign_frame_samples(
         )
 
     return tuple(
-        _build_campaign_frame_sample(bundle, frame_index)
-        for frame_index in selected_indices
+        _build_campaign_frame_sample(bundle, frame_index) for frame_index in selected_indices
     )
 
 
@@ -1134,9 +1133,7 @@ def _build_frame_report(
             dtype=np.float64,
         ),
         noise_floor=(
-            None
-            if sample.noise_floor is None
-            else np.asarray(sample.noise_floor, dtype=np.float64)
+            None if sample.noise_floor is None else np.asarray(sample.noise_floor, dtype=np.float64)
         ),
         operational_bit_count=evaluation.encode_result.operational_bit_count,
         rate_proxy_bit_count=evaluation.encode_result.rate_proxy_bit_count,

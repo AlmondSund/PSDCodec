@@ -168,6 +168,8 @@ def test_campaign_loader_harmonizes_db_frames_and_computes_sequence_noise_floors
     assert bundle.frequency_grid_hz.shape == (4,)
     assert bundle.noise_floors is not None
     assert bundle.noise_floors.shape == (3, 4)
+    assert bundle.timestamps_ms is not None
+    assert bundle.sequence_ids is not None
     assert np.all(bundle.frames > 0.0)
     assert np.array_equal(bundle.timestamps_ms, np.asarray([1_000, 2_000, 3_000], dtype=np.int64))
     assert np.array_equal(
