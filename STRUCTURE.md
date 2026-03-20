@@ -24,7 +24,6 @@ psdcodec/
 ├── models/
 ├── reports/
 ├── notebooks/
-└── old/            # Legacy staging area; not part of the normative layout
 ```
 
 ## Repository Roles
@@ -215,9 +214,6 @@ These locations deserve explicit attention before adding major features:
   [`models/checkpoints/`](/home/marti/Code/PSDCodec/models/checkpoints) and
   [`models/exports/`](/home/marti/Code/PSDCodec/models/exports) should stay out
   of source control.
-- [`old/`](/home/marti/Code/PSDCodec/old):
-  legacy staging area, not part of the intended long-term layout.
-
 ## Placement Rules Going Forward
 
 When adding new material:
@@ -242,4 +238,3 @@ policy tightening:
 2. keep generated demo artifacts reproducible but unversioned,
 3. keep generated packaging metadata out of `src/` version control,
 4. keep future outputs flowing into `reports/` instead of accumulating ad hoc.
-
