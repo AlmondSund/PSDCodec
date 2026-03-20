@@ -3,25 +3,30 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
+import numpy as np
 import pytest
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 from codec.exceptions import CodecConfigurationError
 from interfaces.deployment import (
+    DeploymentArtifacts,
     create_deployment_service,
     evaluate_deployment_batch,
+    load_campaign_frame_samples,
     load_deployment_artifacts,
     select_gallery_frames,
 )
-from pipelines.training import TrainingExperimentConfig
+from pipelines.training import TrainingExperimentConfig, load_training_checkpoint
 
 pytest.importorskip("onnxruntime")
 
 
 def test_deployment_batch_analysis_reports_summary_and_gallery(
-    trained_demo_artifacts,
+    trained_demo_artifacts: Any,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The deployment batch-analysis helpers should summarize and sample demo frames."""
@@ -76,3 +81,60 @@ def test_deployment_loader_rejects_stale_export_config(tmp_path: Path) -> None:
 
     with pytest.raises(CodecConfigurationError, match="stale"):
         load_deployment_artifacts(export_dir)
+
+
+def test_campaign_frame_loading_falls_back_to_source_sidecar_for_npz_exports(
+    trained_demo_artifacts: Any,
+) -> None:
+    """Deployment notebooks should recover raw campaigns from the exported sidecar.
+
+    Purpose:
+        The canonical demo export records the resolved prepared-dataset configuration
+        in `training_summary.json`, which is correct for reproducible runtime loading.
+        Notebook batch analysis still needs the original raw campaign root. This
+        regression test keeps that fallback explicit.
+    """
+    export_dir = (
+        trained_demo_artifacts.project_root / "models" / "exports" / "demo_npz_sidecar"
+    )
+    export_dir.mkdir(parents=True, exist_ok=True)
+
+    checkpoint_path = (
+        trained_demo_artifacts.project_root
+        / "models"
+        / "checkpoints"
+        / "demo"
+        / "best.pt"
+    )
+    loaded_checkpoint = load_training_checkpoint(checkpoint_path)
+    source_config = loaded_checkpoint.experiment_config
+    (export_dir / "demo.source.yaml").write_text(
+        yaml.safe_dump(source_config.to_dict(), sort_keys=False),
+        encoding="utf-8",
+    )
+    resolved_dataset = replace(
+        source_config.dataset,
+        dataset_path=Path("data/processed/tiny_prepared.npz"),
+        source_format="npz",
+        frames_key="frames",
+        frequency_grid_key="frequency_grid_hz",
+        noise_floor_key="noise_floors",
+        noise_floor_window=None,
+    )
+    artifacts = DeploymentArtifacts(
+        export_dir=export_dir,
+        runtime_asset_dir=export_dir / "runtime_assets",
+        onnx_path=export_dir / "encoder.onnx",
+        checkpoint_path=checkpoint_path,
+        runtime_config=source_config.runtime,
+        experiment_config=replace(source_config, dataset=resolved_dataset),
+        codebook=np.zeros((1, 1), dtype=np.float64),
+        probabilities=None,
+    )
+
+    samples = load_campaign_frame_samples(artifacts, max_frames=2)
+    target_bin_count = loaded_checkpoint.experiment_config.dataset.campaign_target_bin_count
+
+    assert len(samples) == 2
+    assert samples[0].campaign_label == "RBW10"
+    assert samples[0].frequency_grid_hz.size == target_bin_count

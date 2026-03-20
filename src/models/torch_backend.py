@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 from dataclasses import dataclass
 from pathlib import Path
@@ -425,7 +426,7 @@ if torch is not None:
             output_path: Path,  # Destination `.onnx` file
             *,
             batch_size: int = 1,  # Example batch size for tracing
-            opset_version: int = 17,  # ONNX opset used by the export
+            opset_version: int = 18,  # ONNX opset used by the export
         ) -> Path:
             """Export the inference-time encoder with the modern torch.export-based path.
 
@@ -454,21 +455,31 @@ if torch is not None:
                     "the active environment."
                 )
 
-            example = torch.zeros(batch_size, self.config.reduced_bin_count, dtype=torch.float32)
+            # Export from a detached CPU/eval clone so the artifact does not depend on
+            # the live training device or training-mode module state.
+            encoder_for_export = copy.deepcopy(self.encoder).to(device="cpu")
+            encoder_for_export.eval()
+            example = torch.zeros(
+                batch_size,
+                self.config.reduced_bin_count,
+                dtype=torch.float32,
+                device="cpu",
+            )
             batch_dim = torch.export.Dim("batch_size")
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            onnx_program = torch.onnx.export(
-                self.encoder,
-                args=(example,),
-                f=None,
-                export_params=True,
-                opset_version=opset_version,
-                dynamo=True,
-                fallback=False,
-                input_names=["normalized_frame"],
-                output_names=["pre_quantization_latents"],
-                dynamic_shapes=({0: batch_dim},),
-            )
+            with torch.inference_mode():
+                onnx_program = torch.onnx.export(
+                    encoder_for_export,
+                    args=(example,),
+                    f=None,
+                    export_params=True,
+                    opset_version=opset_version,
+                    dynamo=True,
+                    fallback=False,
+                    input_names=["normalized_frame"],
+                    output_names=["pre_quantization_latents"],
+                    dynamic_shapes=({0: batch_dim},),
+                )
             if onnx_program is None:
                 raise RuntimeError("torch.onnx.export returned no ONNX program to serialize.")
             onnx_program.save(str(output_path))

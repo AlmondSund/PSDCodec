@@ -8,7 +8,7 @@ import json
 import os
 import random
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -447,6 +447,254 @@ class LoadedTrainingCheckpoint:
     optimizer_state_dict: dict[str, Any]
 
 
+def _write_runtime_assets_from_model(
+    model: TorchFullCodec,  # Trained codec whose runtime tensors should be exported
+    runtime_asset_dir: Path,  # Destination `runtime_assets/` directory
+    runtime_config: CodecRuntimeConfig,  # Deterministic runtime configuration JSON payload
+) -> None:
+    """Persist the deterministic runtime bundle for deployment and notebook use.
+
+    Purpose:
+        The deployment service needs the learned codebook, entropy probabilities, and
+        preprocessing/runtime configuration independently of the training loop. This
+        helper keeps that boundary reusable for both immediate post-training export
+        and later checkpoint recovery.
+    """
+    runtime_asset_dir.mkdir(parents=True, exist_ok=True)
+    np.save(runtime_asset_dir / "codebook.npy", model.export_runtime_codebook())
+    np.save(
+        runtime_asset_dir / "entropy_probabilities.npy",
+        model.export_runtime_probabilities(),
+    )
+    (runtime_asset_dir / "runtime_config.json").write_text(
+        json.dumps(_runtime_config_to_dict(runtime_config), indent=2),
+        encoding="utf-8",
+    )
+
+
+def _write_training_summary_metadata(
+    metadata_path: Path,  # Destination `training_summary.json`
+    *,
+    experiment_config: TrainingExperimentConfig,  # Full experiment configuration
+    resolved_training_device: str,  # Device string recorded for this export
+    selection_metric: str,  # Metric used to select the best checkpoint
+    best_epoch_index: int,  # Zero-based epoch index of the best checkpoint
+    best_selection_score: float,  # Best score observed under `selection_metric`
+    best_validation_loss: float,  # Validation loss at the selected checkpoint
+    history: Sequence[EpochMetrics],  # Epoch history included in the summary JSON
+    best_checkpoint_path: Path | None,  # Persisted best-checkpoint location
+    latest_checkpoint_path: Path | None,  # Optional latest-checkpoint location
+    runtime_asset_dir: Path,  # Exported runtime-asset directory
+    onnx_path: Path | None,  # Optional ONNX encoder path
+) -> None:
+    """Write the deployment summary JSON consumed by notebook/runtime loaders.
+
+    Purpose:
+        The deployment bundle needs one stable metadata file that ties together the
+        exported runtime tensors, the ONNX encoder boundary, and the checkpoint path
+        used to restore the server-side decoder. Centralizing the write logic keeps
+        fresh training exports and recovered exports structurally identical.
+    """
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "experiment_config": experiment_config.to_dict(),
+                "resolved_training_device": resolved_training_device,
+                "selection_metric": selection_metric,
+                "best_epoch_index": best_epoch_index,
+                "best_selection_score": best_selection_score,
+                "best_validation_loss": best_validation_loss,
+                "history": [asdict(epoch) for epoch in history],
+                "best_checkpoint_path": None
+                if best_checkpoint_path is None
+                else str(best_checkpoint_path),
+                "latest_checkpoint_path": None
+                if latest_checkpoint_path is None
+                else str(latest_checkpoint_path),
+                "runtime_asset_dir": str(runtime_asset_dir),
+                "onnx_path": None if onnx_path is None else str(onnx_path),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _resolve_recovery_source_config_path(
+    checkpoint_path: Path,  # Checkpoint used for export recovery
+    *,
+    experiment_name: str,  # Canonical experiment name used for YAML copies
+    source_config_path: Path | None,  # Explicit YAML override, if any
+) -> Path | None:
+    """Resolve which YAML file should be copied into a recovered export directory."""
+    if source_config_path is not None:
+        return source_config_path
+    inferred_path = checkpoint_path.parent / f"{experiment_name}.yaml"
+    if inferred_path.exists():
+        return inferred_path
+    return None
+
+
+def _write_resolved_experiment_config_yaml(
+    export_dir: Path,  # Export directory that should contain the canonical resolved YAML
+    experiment_config: TrainingExperimentConfig,  # Exact configuration used for training
+) -> Path:
+    """Write the resolved experiment YAML consumed by stale-artifact checks.
+
+    Purpose:
+        The deployment loader compares `training_summary.json` against the YAML copy
+        stored beside the export bundle. That YAML therefore must reflect the
+        resolved configuration used during training, not the pre-adjustment source
+        file that may still reference raw campaigns or `device: auto`.
+    """
+    export_dir.mkdir(parents=True, exist_ok=True)
+    destination = export_dir / f"{experiment_config.artifacts.experiment_name}.yaml"
+    destination.write_text(
+        yaml.safe_dump(experiment_config.to_dict(), sort_keys=False),
+        encoding="utf-8",
+    )
+    return destination
+
+
+def _copy_source_config_sidecar_if_present(
+    destination_dir: Path,  # Directory that should receive the optional sidecar copy
+    *,
+    experiment_name: str,  # Experiment name used to build a stable sidecar filename
+    source_config_path: Path | None,  # Human-authored source YAML, if available
+) -> Path | None:
+    """Copy the original source YAML as a non-canonical sidecar when available.
+
+    Purpose:
+        The raw source YAML is still useful for debugging, but it must not replace
+        the canonical resolved export YAML because the deployment loader uses the
+        latter for stale-artifact detection. This helper keeps the human-authored
+        YAML as an auxiliary sidecar instead.
+    """
+    if source_config_path is None:
+        return None
+    destination_dir.mkdir(parents=True, exist_ok=True)
+    destination = (
+        destination_dir
+        / f"{experiment_name}.source{source_config_path.suffix or '.yaml'}"
+    )
+    shutil.copy2(source_config_path, destination)
+    return destination
+
+
+def recover_training_export_from_checkpoint(
+    checkpoint_path: str | Path,
+    *,
+    export_dir: str | Path | None = None,
+    source_config_path: str | Path | None = None,
+    resolved_training_device: str = "recovered_from_checkpoint",
+) -> TrainingSummary:
+    """Rebuild deployment artifacts from a saved checkpoint without retraining.
+
+    Purpose:
+        Training can finish successfully and still fail later while exporting ONNX or
+        writing the deployment bundle. The saved checkpoint remains the authoritative
+        model state, so this helper reconstructs the export directory directly from
+        that checkpoint.
+
+    Args:
+        checkpoint_path: Path to the saved checkpoint used as the recovery source.
+        export_dir: Optional explicit export directory override. When omitted, the
+            helper uses `artifacts.export_root / artifacts.experiment_name` from the
+            checkpointed experiment configuration.
+        source_config_path: Optional YAML file copied into the recovered export
+            directory for stale-artifact detection in notebook/deployment loaders.
+        resolved_training_device: Human-readable device label written into the
+            recovered `training_summary.json`.
+
+    Returns:
+        A `TrainingSummary` describing the recovered export bundle.
+
+    Raises:
+        FileNotFoundError: If `checkpoint_path` does not exist.
+    """
+    resolved_checkpoint_path = Path(checkpoint_path)
+    if not resolved_checkpoint_path.exists():
+        raise FileNotFoundError(f"Training checkpoint does not exist: {resolved_checkpoint_path}")
+
+    loaded_checkpoint = load_training_checkpoint(
+        resolved_checkpoint_path,
+        map_location="cpu",
+    )
+    resolved_export_dir = (
+        Path(export_dir)
+        if export_dir is not None
+        else (
+            loaded_checkpoint.experiment_config.artifacts.export_root
+            / loaded_checkpoint.experiment_config.artifacts.experiment_name
+        )
+    )
+    runtime_asset_dir = resolved_export_dir / "runtime_assets"
+    resolved_export_dir.mkdir(parents=True, exist_ok=True)
+
+    source_config = _resolve_recovery_source_config_path(
+        resolved_checkpoint_path,
+        experiment_name=loaded_checkpoint.experiment_config.artifacts.experiment_name,
+        source_config_path=None if source_config_path is None else Path(source_config_path),
+    )
+    _write_resolved_experiment_config_yaml(
+        resolved_export_dir,
+        loaded_checkpoint.experiment_config,
+    )
+    _copy_source_config_sidecar_if_present(
+        resolved_export_dir,
+        experiment_name=loaded_checkpoint.experiment_config.artifacts.experiment_name,
+        source_config_path=source_config,
+    )
+
+    model = TorchFullCodec(loaded_checkpoint.experiment_config.model)
+    model.load_state_dict(loaded_checkpoint.model_state_dict)
+    model.eval()
+
+    _write_runtime_assets_from_model(
+        model,
+        runtime_asset_dir,
+        loaded_checkpoint.experiment_config.runtime,
+    )
+    recovered_onnx_path = None
+    if loaded_checkpoint.experiment_config.artifacts.export_onnx:
+        recovered_onnx_path = resolved_export_dir / "encoder.onnx"
+        model.export_encoder_to_onnx(recovered_onnx_path)
+
+    inferred_latest_checkpoint_path = resolved_checkpoint_path.parent / "latest.pt"
+    latest_checkpoint_path = (
+        inferred_latest_checkpoint_path if inferred_latest_checkpoint_path.exists() else None
+    )
+    history = (loaded_checkpoint.metrics,)
+    _write_training_summary_metadata(
+        resolved_export_dir / "training_summary.json",
+        experiment_config=loaded_checkpoint.experiment_config,
+        resolved_training_device=resolved_training_device,
+        selection_metric=loaded_checkpoint.selection_metric,
+        best_epoch_index=loaded_checkpoint.epoch_index,
+        best_selection_score=loaded_checkpoint.best_selection_score,
+        best_validation_loss=loaded_checkpoint.best_validation_loss,
+        history=history,
+        best_checkpoint_path=resolved_checkpoint_path,
+        latest_checkpoint_path=latest_checkpoint_path,
+        runtime_asset_dir=runtime_asset_dir,
+        onnx_path=recovered_onnx_path,
+    )
+    return TrainingSummary(
+        history=history,
+        best_epoch_index=loaded_checkpoint.epoch_index,
+        selection_metric=loaded_checkpoint.selection_metric,
+        best_selection_score=loaded_checkpoint.best_selection_score,
+        best_validation_loss=loaded_checkpoint.best_validation_loss,
+        resolved_training_device=resolved_training_device,
+        best_checkpoint_path=resolved_checkpoint_path,
+        latest_checkpoint_path=latest_checkpoint_path,
+        export_dir=resolved_export_dir,
+        runtime_asset_dir=runtime_asset_dir,
+        onnx_path=recovered_onnx_path,
+    )
+
+
 class TorchCodecTrainer:
     """Application-layer trainer for the PyTorch PSD codec."""
 
@@ -643,7 +891,12 @@ class TorchCodecTrainer:
         runtime_asset_dir.mkdir(parents=True, exist_ok=True)
         if source_config_path is not None:
             shutil.copy2(source_config_path, checkpoint_dir / source_config_path.name)
-            shutil.copy2(source_config_path, export_dir / source_config_path.name)
+        _write_resolved_experiment_config_yaml(export_dir, self.experiment_config)
+        _copy_source_config_sidecar_if_present(
+            export_dir,
+            experiment_name=self.experiment_config.artifacts.experiment_name,
+            source_config_path=source_config_path,
+        )
 
         history: list[EpochMetrics] = []
         best_validation_loss = float("inf")
@@ -808,30 +1061,19 @@ class TorchCodecTrainer:
         if self.experiment_config.artifacts.export_onnx:
             onnx_path = export_dir / "encoder.onnx"
             self.model.export_encoder_to_onnx(onnx_path)
-        metadata_path = export_dir / "training_summary.json"
-        metadata_path.parent.mkdir(parents=True, exist_ok=True)
-        metadata_path.write_text(
-            json.dumps(
-                {
-                    "experiment_config": self.experiment_config.to_dict(),
-                    "resolved_training_device": self.training_device,
-                    "selection_metric": self.experiment_config.artifacts.selection_metric,
-                    "best_epoch_index": best_epoch_index,
-                    "best_selection_score": best_selection_score,
-                    "best_validation_loss": best_validation_loss,
-                    "history": [asdict(epoch) for epoch in history],
-                    "best_checkpoint_path": None
-                    if best_checkpoint_path is None
-                    else str(best_checkpoint_path),
-                    "latest_checkpoint_path": None
-                    if latest_checkpoint_path is None
-                    else str(latest_checkpoint_path),
-                    "runtime_asset_dir": str(runtime_asset_dir),
-                    "onnx_path": None if onnx_path is None else str(onnx_path),
-                },
-                indent=2,
-            ),
-            encoding="utf-8",
+        _write_training_summary_metadata(
+            export_dir / "training_summary.json",
+            experiment_config=self.experiment_config,
+            resolved_training_device=self.training_device,
+            selection_metric=self.experiment_config.artifacts.selection_metric,
+            best_epoch_index=best_epoch_index,
+            best_selection_score=best_selection_score,
+            best_validation_loss=best_validation_loss,
+            history=history,
+            best_checkpoint_path=best_checkpoint_path,
+            latest_checkpoint_path=latest_checkpoint_path,
+            runtime_asset_dir=runtime_asset_dir,
+            onnx_path=onnx_path,
         )
         return TrainingSummary(
             history=tuple(history),
@@ -1184,15 +1426,10 @@ class TorchCodecTrainer:
 
     def _export_runtime_assets(self, runtime_asset_dir: Path) -> None:
         """Persist the codebook, entropy probabilities, and runtime configuration."""
-        runtime_asset_dir.mkdir(parents=True, exist_ok=True)
-        np.save(runtime_asset_dir / "codebook.npy", self.model.export_runtime_codebook())
-        np.save(
-            runtime_asset_dir / "entropy_probabilities.npy",
-            self.model.export_runtime_probabilities(),
-        )
-        (runtime_asset_dir / "runtime_config.json").write_text(
-            json.dumps(_runtime_config_to_dict(self.experiment_config.runtime), indent=2),
-            encoding="utf-8",
+        _write_runtime_assets_from_model(
+            self.model,
+            runtime_asset_dir,
+            self.experiment_config.runtime,
         )
 
 

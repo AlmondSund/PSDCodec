@@ -11,7 +11,7 @@ def export_encoder_to_onnx(
     output_path: str | Path,  # Destination `.onnx` path
     *,
     batch_size: int = 1,  # Example batch size for tracing
-    opset_version: int = 17,  # ONNX opset requested by the export
+    opset_version: int = 18,  # ONNX opset requested by the export
 ) -> Path:
     """Export the encoder-only deployment boundary to ONNX."""
     destination = Path(output_path)

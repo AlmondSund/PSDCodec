@@ -399,22 +399,22 @@ def load_campaign_frame_samples(
         frame_indices=frame_indices,
         max_frames=max_frames,
     )
-    dataset_config = artifacts.experiment_config.dataset
-    if dataset_config.source_format != "campaigns":
-        raise CodecConfigurationError(
-            "load_campaign_frame_samples requires campaign-backed deployment assets.",
-        )
+    dataset_config = _resolve_campaign_dataset_config(artifacts)
 
     resolved_dataset_path = _resolve_repository_path(
         export_dir=artifacts.export_dir,
         candidate_path=dataset_config.dataset_path,
     )
+    if dataset_config.campaign_target_bin_count is None:
+        raise CodecConfigurationError(
+            "Campaign-backed deployment analysis requires campaign_target_bin_count.",
+        )
     bundle = load_campaign_dataset_bundle(
         resolved_dataset_path,
         include_campaign_globs=dataset_config.campaign_include_globs,
         exclude_campaign_globs=dataset_config.campaign_exclude_globs,
         include_node_globs=dataset_config.campaign_node_globs,
-        target_bin_count=artifacts.original_bin_count,
+        target_bin_count=dataset_config.campaign_target_bin_count,
         value_scale=dataset_config.campaign_value_scale,
         max_frames=max(selected_indices) + 1,
         noise_floor_window=dataset_config.noise_floor_window,
@@ -530,6 +530,57 @@ def _load_exported_source_config_if_present(
     if not candidate_paths:
         return None
     return TrainingExperimentConfig.from_yaml(candidate_paths[0])
+
+
+def _load_exported_source_sidecar_config_if_present(
+    export_dir: Path,
+    *,
+    experiment_name: str,
+) -> TrainingExperimentConfig | None:
+    """Load the optional source-YAML sidecar preserved beside an export bundle.
+
+    Purpose:
+        Some exports intentionally record the resolved prepared-dataset config in
+        `training_summary.json` so the runtime bundle is reproducible. Notebook-scale
+        campaign analysis still needs the original raw campaign root, which is kept in
+        the `.source.yaml` sidecar when available.
+    """
+    candidate_paths = [
+        export_dir / f"{experiment_name}.source.yaml",
+        export_dir / f"{experiment_name}.source.yml",
+    ]
+    for candidate_path in candidate_paths:
+        if candidate_path.exists():
+            return TrainingExperimentConfig.from_yaml(candidate_path)
+    return None
+
+
+def _resolve_campaign_dataset_config(artifacts: DeploymentArtifacts) -> Any:
+    """Resolve the raw campaign dataset config used for notebook deployment analysis.
+
+    Purpose:
+        The deployment runtime itself only needs the resolved model/runtime config,
+        but notebook diagnostics need access to the original raw campaign corpus.
+        When an export records a cached `.npz` dataset in its summary, this helper
+        falls back to the exported source-config sidecar to recover the raw campaign
+        dataset boundary.
+    """
+    dataset_config = artifacts.experiment_config.dataset
+    if dataset_config.source_format == "campaigns":
+        return dataset_config
+
+    source_config = _load_exported_source_sidecar_config_if_present(
+        artifacts.export_dir,
+        experiment_name=artifacts.experiment_config.artifacts.experiment_name,
+    )
+    if source_config is not None and source_config.dataset.source_format == "campaigns":
+        return source_config.dataset
+
+    raise CodecConfigurationError(
+        "load_campaign_frame_samples requires campaign-backed deployment assets. "
+        "This export records a prepared `.npz` dataset and does not include a "
+        "campaign-backed source-config sidecar.",
+    )
 
 
 def _build_campaign_frame_sample(

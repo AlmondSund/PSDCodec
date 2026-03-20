@@ -33,6 +33,7 @@ from pipelines.training import (
     _compose_validation_deployment_score,
     _selection_candidate_is_acceptable,
     load_training_checkpoint,
+    recover_training_export_from_checkpoint,
     resolve_accelerator_training_device_string,
 )
 
@@ -268,6 +269,30 @@ def test_training_export_writes_encoder_onnx(tmp_path: Path) -> None:
     model = onnx.load(str(summary.onnx_path))
     assert model.graph.input[0].name == "normalized_frame"
     assert model.graph.output[0].name == "pre_quantization_latents"
+
+
+def test_recover_training_export_from_checkpoint_rebuilds_bundle(tmp_path: Path) -> None:
+    """A saved checkpoint should be sufficient to rebuild the deployment export bundle."""
+    onnx = pytest.importorskip("onnx")
+    pytest.importorskip("onnxscript")
+    experiment_config = _make_experiment_config(tmp_path, export_onnx=True)
+    trainer = TorchCodecTrainer(experiment_config)
+    training_dataset, validation_dataset = trainer.load_prepared_datasets()
+    summary = trainer.fit(training_dataset, validation_dataset)
+
+    assert summary.best_checkpoint_path is not None
+    recovered_export_dir = tmp_path / "recovered_export"
+    recovered_summary = recover_training_export_from_checkpoint(
+        summary.best_checkpoint_path,
+        export_dir=recovered_export_dir,
+    )
+
+    assert recovered_summary.onnx_path is not None
+    assert recovered_summary.onnx_path.exists()
+    assert (recovered_export_dir / "training_summary.json").exists()
+    recovered_model = onnx.load(str(recovered_summary.onnx_path))
+    assert recovered_model.graph.input[0].name == "normalized_frame"
+    assert recovered_model.graph.output[0].name == "pre_quantization_latents"
 
 
 def test_training_epoch_skips_validation_only_diagnostics(

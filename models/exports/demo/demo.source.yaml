@@ -1,0 +1,132 @@
+dataset:
+  dataset_path: data/raw/campaigns
+  source_format: campaigns
+  frames_key: frames
+  frequency_grid_key: frequency_grid_hz
+  noise_floor_key:
+  noise_floor_window: 32
+  noise_floor_percentile: 10.0
+  validation_fraction: 0.2
+  shuffle: true
+  seed: 0
+  campaign_include_globs:
+    - "*"
+  campaign_exclude_globs: []
+  campaign_node_globs:
+    - "Node*.csv"
+  campaign_target_bin_count: 4096
+  campaign_value_scale: db_to_power
+  campaign_max_frames:
+
+runtime:
+  preprocessing:
+    # The manuscript's example task depends on narrow-peak occupancy and feature
+    # preservation, so the downsampling is intentionally conservative. The previous
+    # 512-bin run was still worse than the preprocessing-only baseline on deployment,
+    # so the canonical demo now keeps a 1024-bin reduced representation before the
+    # learned compression stage.
+    reduced_bin_count: 1024
+    resolution_factor:
+    dynamic_range_offset: 1.0e-6
+    block_count: 32
+    stability_epsilon: 1.0e-6
+    mean_quantizer:
+      minimum: -20.0
+      maximum: 40.0
+      bits: 12
+    log_sigma_quantizer:
+      minimum: -12.0
+      maximum: 8.0
+      bits: 10
+  entropy_model:
+    alphabet_size: 512
+    precision_bits: 12
+    pseudo_count: 1.0
+  packet_format:
+    magic: PSDC
+    version: 1
+
+model:
+  reduced_bin_count: 1024
+  # The preprocessing-only baseline is already strong, so the learned stage needs
+  # more discrete support than the earlier 256-token bottleneck. The PyTorch
+  # backbone is now convolutional, so the width parameter governs local spectral
+  # feature channels rather than a flat MLP layer.
+  latent_vector_count: 512
+  embedding_dim: 8
+  codebook_size: 512
+  hidden_dim: 128
+  residual_block_count: 4
+  convolution_kernel_size: 7
+  commitment_weight: 0.25
+
+training:
+  # This canonical demo run prioritizes deployment fidelity over aggressive
+  # compression. The deployment notebook showed that the learned stage was still
+  # losing narrow peaks, and the high-batch throughput experiment stayed worse than
+  # preprocessing-only on every monitored component. Now that the training hot path
+  # no longer wastes time on CPU-side validation diagnostics, the demo reverts to a
+  # quality-first profile: a smaller batch for more optimizer steps per epoch, plus
+  # a wider model and more latent positions so the learned stage is not forced into
+  # an unnecessarily destructive bottleneck. The stabilized convolutional model also
+  # showed that the outer loss was still overweighting the differentiable task
+  # surrogate and entropy regularization relative to direct PSD fidelity, so the
+  # canonical demo now shifts those weights toward reconstruction quality.
+  epoch_count: 100
+  batch_size: 128
+  random_seed: 0
+  learning_rate: 2.0e-4
+  weight_decay: 1.0e-5
+  gradient_clip_norm: 1.0
+  device: auto
+  mixed_precision: auto
+  enable_model_compile: true
+  allow_tf32: true
+  data_loader_worker_count:
+  pin_memory:
+  prefetch_factor: 4
+  persistent_data_loader_workers: true
+  loss:
+    psd_weight: 5.0
+    rate_weight: 2.0e-5
+    vq_weight: 1.0
+    task_weight: 0.05
+
+artifacts:
+  experiment_name: demo
+  checkpoint_root: models/checkpoints
+  export_root: models/exports
+  export_onnx: true
+  save_latest_checkpoint: true
+  latest_checkpoint_interval: 10
+  save_best_checkpoint: true
+  # The deployment analysis showed that even the exact illustrative task monitor was
+  # not sufficient by itself: the exported model could still lose the raw dominant
+  # peak while appearing acceptable on the smoothed task features. The demo model is
+  # therefore selected by a deployment-aligned score relative to preprocessing-only,
+  # and bad checkpoints are rejected instead of being exported.
+  selection_metric: validation_deployment_score
+  require_selection_to_beat_preprocessing: true
+
+task:
+  # Manuscript example: occupancy consistency + feature preservation.
+  # These values are in linear-power units, derived from observed campaign frame and
+  # noise-floor deltas rather than from dB magnitudes. The current deterministic
+  # demo runs still fail mainly through dominant-peak swaps and excess PSD blur,
+  # not through centroid or occupied-bandwidth drift. The canonical demo therefore
+  # keeps occupancy and dominant-peak preservation active, but drops the centroid
+  # and bandwidth feature terms until the learned stage can first beat the
+  # preprocessing-only baseline on the metrics that the deployment score actually
+  # penalizes directly.
+  occupancy_margin: 5.0e-6
+  occupancy_temperature: 2.5e-6
+  occupancy_positive_weight: 2.0
+  occupancy_negative_weight: 1.0
+  smoothing_window_bins: 5
+  huber_delta: 100000.0
+  peak_weight: 1.0e-11
+  peak_power_weight: 1.0
+  centroid_weight: 0.0
+  bandwidth_weight: 0.0
+  occupancy_weight: 0.5
+  feature_weight: 2.0
