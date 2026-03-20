@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import numpy as np
 import pytest
 
@@ -97,6 +99,7 @@ def test_public_task_helpers_return_aligned_outputs() -> None:
     assert soft_mask.shape == frame.shape
     assert hard_mask.shape == frame.shape
     assert 90.0e6 <= features.peak_frequency_hz <= 94.0e6
+    assert np.isfinite(features.peak_power_db)
 
 
 def test_soft_occupancy_remains_finite_for_large_logits() -> None:
@@ -223,7 +226,46 @@ def test_torch_illustrative_task_loss_has_finite_gradients_for_narrow_peaks() ->
         frequency_grid_hz=frequency_grid_hz,
         config=config,
     )
-    loss.backward()
+    cast(Any, loss).backward()
 
     assert reconstructed.grad is not None
     assert bool(torch.isfinite(reconstructed.grad).all().item())
+
+
+def test_torch_illustrative_task_loss_penalizes_peak_power_mismatch() -> None:
+    """The training surrogate should penalize dominant-peak power drift explicitly."""
+    torch = pytest.importorskip("torch")
+    config = IllustrativeTaskConfig(
+        occupancy_margin=0.05,
+        occupancy_temperature=0.05,
+        smoothing_window_bins=3,
+        huber_delta=10.0,
+        peak_weight=0.0,
+        peak_power_weight=1.0,
+        centroid_weight=0.0,
+        bandwidth_weight=0.0,
+        occupancy_weight=0.0,
+        feature_weight=1.0,
+    )
+    reference = torch.tensor([[0.1, 0.2, 4.0, 0.2, 0.1]], dtype=torch.float32)
+    reconstructed_good = reference.clone()
+    reconstructed_bad = torch.tensor([[0.1, 0.2, 2.0, 0.2, 0.1]], dtype=torch.float32)
+    noise_floors = torch.full_like(reference, 0.05)
+    frequency_grid_hz = torch.linspace(100.0, 104.0, steps=5, dtype=torch.float32)
+
+    loss_good = torch_illustrative_task_loss(
+        reference,
+        reconstructed_good,
+        noise_floors=noise_floors,
+        frequency_grid_hz=frequency_grid_hz,
+        config=config,
+    )
+    loss_bad = torch_illustrative_task_loss(
+        reference,
+        reconstructed_bad,
+        noise_floors=noise_floors,
+        frequency_grid_hz=frequency_grid_hz,
+        config=config,
+    )
+
+    assert float(loss_bad.detach().cpu().item()) > float(loss_good.detach().cpu().item())

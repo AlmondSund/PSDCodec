@@ -21,6 +21,7 @@ class IllustrativeTaskConfig:
     smoothing_window_bins: int = 5  # Odd moving-average window used only for features
     huber_delta: float = 1.0  # Huber threshold δ
     peak_weight: float = 1.0  # α_pk
+    peak_power_weight: float = 1.0  # α_pk,pwr
     centroid_weight: float = 1.0  # α_cent
     bandwidth_weight: float = 1.0  # α_bw
     occupancy_weight: float = 1.0  # β_occ
@@ -34,6 +35,18 @@ class IllustrativeTaskConfig:
             raise CodecConfigurationError("smoothing_window_bins must be a positive odd integer.")
         if self.huber_delta <= 0.0:
             raise CodecConfigurationError("huber_delta must be strictly positive.")
+        if self.peak_weight < 0.0:
+            raise CodecConfigurationError("peak_weight must be non-negative.")
+        if self.peak_power_weight < 0.0:
+            raise CodecConfigurationError("peak_power_weight must be non-negative.")
+        if self.centroid_weight < 0.0:
+            raise CodecConfigurationError("centroid_weight must be non-negative.")
+        if self.bandwidth_weight < 0.0:
+            raise CodecConfigurationError("bandwidth_weight must be non-negative.")
+        if self.occupancy_weight < 0.0:
+            raise CodecConfigurationError("occupancy_weight must be non-negative.")
+        if self.feature_weight < 0.0:
+            raise CodecConfigurationError("feature_weight must be non-negative.")
 
 
 @dataclass(frozen=True)
@@ -41,6 +54,7 @@ class IllustrativeFeatureSet:
     """Illustrative sensing features derived from one PSD frame."""
 
     peak_frequency_hz: float  # Dominant peak location after smoothing
+    peak_power_db: float  # Dominant peak amplitude expressed in dB
     spectral_centroid_hz: float  # Energy-weighted spectral centroid
     occupied_bandwidth_hz: float  # Width of the dominant occupied component
 
@@ -358,6 +372,14 @@ def _occupancy_consistency(
     return float(-np.mean(positive + negative))
 
 
+def _peak_power_db_from_frame(
+    frame: FloatArray,  # PSD frame from which the dominant raw peak is read
+) -> float:
+    """Return the dominant raw peak amplitude in dB for one PSD frame."""
+    peak_power_linear = float(np.max(frame))
+    return float(10.0 * np.log10(max(peak_power_linear, 1.0e-12)))
+
+
 def _extract_illustrative_features(
     frame: FloatArray,  # PSD frame from which features are extracted
     frequency_grid_hz: FloatArray,  # Frequency support ω_n
@@ -365,7 +387,7 @@ def _extract_illustrative_features(
     *,
     smoothing_window_bins: int,
 ) -> IllustrativeFeatureSet:
-    """Extract the illustrative peak, centroid, and occupied-bandwidth features."""
+    """Extract the illustrative peak, peak-power, centroid, and bandwidth features."""
     smoothed = _moving_average(frame, window_length=smoothing_window_bins)
     peak_index = int(np.argmax(smoothed))
     total_power = float(np.sum(frame))
@@ -388,6 +410,7 @@ def _extract_illustrative_features(
 
     return IllustrativeFeatureSet(
         peak_frequency_hz=float(frequency_grid_hz[peak_index]),
+        peak_power_db=_peak_power_db_from_frame(frame),
         spectral_centroid_hz=centroid,
         occupied_bandwidth_hz=dominant_bandwidth_hz,
     )
@@ -404,6 +427,10 @@ def _feature_preservation_loss(
         reference_features.peak_frequency_hz - reconstructed_features.peak_frequency_hz,
         delta=config.huber_delta,
     )
+    peak_power_term = _huber(
+        reference_features.peak_power_db - reconstructed_features.peak_power_db,
+        delta=config.huber_delta,
+    )
     centroid_term = _huber(
         reference_features.spectral_centroid_hz - reconstructed_features.spectral_centroid_hz,
         delta=config.huber_delta,
@@ -414,6 +441,7 @@ def _feature_preservation_loss(
     )
     return (
         config.peak_weight * peak_term
+        + config.peak_power_weight * peak_power_term
         + config.centroid_weight * centroid_term
         + config.bandwidth_weight * bandwidth_term
     )

@@ -49,12 +49,15 @@ runtime:
 model:
   reduced_bin_count: 1024
   # The preprocessing-only baseline is already strong, so the learned stage needs
-  # more discrete support than the earlier 256-token bottleneck to preserve narrow
-  # peaks instead of smearing them across the decoder MLP.
+  # more discrete support than the earlier 256-token bottleneck. The PyTorch
+  # backbone is now convolutional, so the width parameter governs local spectral
+  # feature channels rather than a flat MLP layer.
   latent_vector_count: 512
   embedding_dim: 8
   codebook_size: 512
-  hidden_dim: 2048
+  hidden_dim: 128
+  residual_block_count: 4
+  convolution_kernel_size: 7
   commitment_weight: 0.25
 
 training:
@@ -65,7 +68,10 @@ training:
   # no longer wastes time on CPU-side validation diagnostics, the demo reverts to a
   # quality-first profile: a smaller batch for more optimizer steps per epoch, plus
   # a wider model and more latent positions so the learned stage is not forced into
-  # an unnecessarily destructive bottleneck.
+  # an unnecessarily destructive bottleneck. The stabilized convolutional model also
+  # showed that the outer loss was still overweighting the differentiable task
+  # surrogate and entropy regularization relative to direct PSD fidelity, so the
+  # canonical demo now shifts those weights toward reconstruction quality.
   epoch_count: 100
   batch_size: 128
   learning_rate: 2.0e-4
@@ -80,10 +86,10 @@ training:
   prefetch_factor: 4
   persistent_data_loader_workers: true
   loss:
-    psd_weight: 3.0
-    rate_weight: 1.0e-4
+    psd_weight: 5.0
+    rate_weight: 2.0e-5
     vq_weight: 1.0
-    task_weight: 0.15
+    task_weight: 0.05
 
 artifacts:
   experiment_name: demo

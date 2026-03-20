@@ -72,6 +72,38 @@ if torch is not None:
                 return candidate
         return 1
 
+    def _initialize_residual_skip_projection_to_zero(
+        projection: nn.Conv1d,
+    ) -> None:
+        """Initialize a residual projection as a neutral zero contribution.
+
+        Purpose:
+            The encoder and decoder both use 1x1 skip projections around the learned
+            convolutional path. Starting those projections at a random scale made the
+            encoder emit latents that were tens of times larger than the VQ codebook,
+            which in turn caused the quantizer loss to dominate training. A zero
+            initialization keeps the residual path available without letting it drown
+            the optimization signal at step zero.
+        """
+        nn.init.zeros_(projection.weight)
+        if projection.bias is not None:
+            nn.init.zeros_(projection.bias)
+
+    def _initialize_bounded_codebook(
+        codebook: nn.Parameter,
+    ) -> None:
+        """Initialize codewords on the same scale as the bounded encoder latents.
+
+        Purpose:
+            The encoder now constrains its pre-quantization activations with `tanh`,
+            so the codebook should start in a comparable range instead of near zero.
+            Matching the initial latent/codeword scale reduces the large Euclidean
+            mismatch that previously made `vq_loss` dominate the objective.
+        """
+        embedding_dim = max(1, int(codebook.shape[1]))
+        bound = float(embedding_dim) ** -0.5
+        nn.init.uniform_(codebook, -bound, bound)
+
 
     class TorchResidualConvBlock(nn.Module):
         """Local residual block that preserves neighborhood structure in PSD space."""
@@ -179,7 +211,11 @@ if torch is not None:
                 kernel_size=config.convolution_kernel_size,
                 padding=padding,
             )
-            self.residual_blocks = nn.Sequential(
+            self.stem_residual_block = TorchResidualConvBlock(
+                config.hidden_dim,
+                kernel_size=config.convolution_kernel_size,
+            )
+            self.latent_residual_blocks = nn.Sequential(
                 *[
                     TorchResidualConvBlock(
                         config.hidden_dim,
@@ -192,19 +228,34 @@ if torch is not None:
             self.output_activation = nn.GELU()
             self.output_projection = nn.Conv1d(config.hidden_dim, config.embedding_dim, 1)
             self.input_skip_projection = nn.Conv1d(1, config.embedding_dim, 1)
-            self.latent_pool = nn.AdaptiveAvgPool1d(config.latent_vector_count)
+            self.output_bounding = nn.Tanh()
+            _initialize_residual_skip_projection_to_zero(self.input_skip_projection)
 
         def forward(self, normalized_frames: torch.Tensor) -> torch.Tensor:
             """Encode batched normalized frames into `[batch, M, d]` latents."""
             spectral_input = normalized_frames.unsqueeze(1)
             spectral_features = self.input_projection(spectral_input)
-            spectral_features = self.residual_blocks(spectral_features)
+            spectral_features = self.stem_residual_block(spectral_features)
+            spectral_features = functional.interpolate(
+                spectral_features,
+                size=self.latent_vector_count,
+                mode="nearest",
+            )
+            spectral_features = self.latent_residual_blocks(spectral_features)
             spectral_features = self.output_norm(spectral_features)
             spectral_features = self.output_activation(spectral_features)
             latent_features = self.output_projection(spectral_features)
-            latent_features = self.latent_pool(latent_features)
-            latent_skip = self.latent_pool(self.input_skip_projection(spectral_input))
-            return (latent_features + latent_skip).transpose(1, 2).contiguous()
+            latent_skip = functional.interpolate(
+                self.input_skip_projection(spectral_input),
+                size=self.latent_vector_count,
+                mode="nearest",
+            )
+
+            # Bound the encoder output before vector quantization so the latent/codebook
+            # distance scale stays well-conditioned across random initialization and
+            # early training.
+            bounded_latents = self.output_bounding(latent_features + latent_skip)
+            return bounded_latents.transpose(1, 2).contiguous()
 
     class TorchSpectralDecoder(nn.Module):
         """Convolutional decoder reconstructing normalized frames from local latents."""
@@ -225,7 +276,7 @@ if torch is not None:
             self.reduced_bin_count = config.reduced_bin_count
             self.input_projection = nn.Conv1d(config.embedding_dim, config.hidden_dim, 1)
             self.output_skip_projection = nn.Conv1d(config.embedding_dim, 1, 1)
-            self.residual_blocks = nn.Sequential(
+            self.latent_residual_blocks = nn.Sequential(
                 *[
                     TorchResidualConvBlock(
                         config.hidden_dim,
@@ -233,6 +284,10 @@ if torch is not None:
                     )
                     for _ in range(config.residual_block_count)
                 ]
+            )
+            self.output_residual_block = TorchResidualConvBlock(
+                config.hidden_dim,
+                kernel_size=config.convolution_kernel_size,
             )
             self.output_norm = nn.GroupNorm(group_count, config.hidden_dim)
             self.output_activation = nn.GELU()
@@ -242,29 +297,29 @@ if torch is not None:
                 kernel_size=config.convolution_kernel_size,
                 padding=padding,
             )
+            _initialize_residual_skip_projection_to_zero(self.output_skip_projection)
 
         def forward(self, quantized_latents: torch.Tensor) -> torch.Tensor:
             """Decode batched latent tensors into normalized frames with length N_r."""
             latent_features = quantized_latents.transpose(1, 2).contiguous()
             spectral_features = self.input_projection(latent_features)
+            spectral_features = self.latent_residual_blocks(spectral_features)
 
-            # Expand the latent grid back to the reduced PSD resolution while keeping
-            # the interpolation deterministic for ONNX export and runtime tracing.
+            # Expand the latent grid back to the reduced PSD resolution using nearest
+            # interpolation so sharp narrow peaks are not blurred before local refinement.
             spectral_features = functional.interpolate(
                 spectral_features,
                 size=self.reduced_bin_count,
-                mode="linear",
-                align_corners=False,
+                mode="nearest",
             )
-            spectral_features = self.residual_blocks(spectral_features)
+            spectral_features = self.output_residual_block(spectral_features)
             spectral_features = self.output_norm(spectral_features)
             spectral_features = self.output_activation(spectral_features)
             reconstructed = self.output_projection(spectral_features)
             reconstructed_skip = functional.interpolate(
                 self.output_skip_projection(latent_features),
                 size=self.reduced_bin_count,
-                mode="linear",
-                align_corners=False,
+                mode="nearest",
             )
             return (reconstructed + reconstructed_skip).squeeze(1)
 
@@ -281,7 +336,8 @@ if torch is not None:
             """Initialize the learnable codebook."""
             super().__init__()
             self.commitment_weight = commitment_weight
-            self.codebook = nn.Parameter(torch.randn(codebook_size, embedding_dim) * 0.05)
+            self.codebook = nn.Parameter(torch.empty(codebook_size, embedding_dim))
+            _initialize_bounded_codebook(self.codebook)
 
         def forward(self, latents: torch.Tensor) -> TorchVectorQuantizationOutput:
             """Quantize latents and compute the stabilization loss."""

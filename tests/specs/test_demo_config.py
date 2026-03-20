@@ -46,6 +46,7 @@ def test_demo_yaml_points_to_the_canonical_manuscript_run() -> None:
     assert config.training.enable_model_compile
     assert config.artifacts.latest_checkpoint_interval == 10
     assert config.task is not None
+    assert config.task.peak_power_weight == 1.0
 
 
 def test_repo_keeps_one_single_demo_notebook() -> None:

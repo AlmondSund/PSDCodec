@@ -91,6 +91,7 @@ class TorchIllustrativeFeatureBatch:
     """Differentiable illustrative-feature surrogate evaluated over one batch."""
 
     peak_frequency_hz: Tensor  # Soft-argmax dominant-peak location surrogate
+    peak_power_db: Tensor  # Soft dominant-peak power surrogate expressed in dB
     spectral_centroid_hz: Tensor  # Exact spectral centroid
     occupied_bandwidth_hz: Tensor  # Soft occupied-bandwidth surrogate
 
@@ -147,8 +148,8 @@ def torch_illustrative_task_loss(
 
     Purpose:
         Align the training objective with the manuscript's illustrative sensing task:
-        occupancy consistency plus feature preservation on peak location, spectral
-        centroid, and occupied bandwidth.
+        occupancy consistency plus feature preservation on peak location, dominant
+        peak power, spectral centroid, and occupied bandwidth.
 
     Notes:
         The exact manuscript features involve `argmax` and connected-component
@@ -157,6 +158,7 @@ def torch_illustrative_task_loss(
 
         - occupancy uses the exact soft thresholding term from the paper,
         - dominant peak location uses a normalized soft-argmax after smoothing,
+        - dominant peak power uses the same soft peak weights applied to the raw frame,
         - spectral centroid is exact and differentiable,
         - occupied bandwidth uses a soft occupancy-weighted interval-width surrogate.
     """
@@ -332,6 +334,12 @@ def _torch_extract_illustrative_features(
     peak_weights = torch_module.softmax(peak_logits, dim=1)
     peak_frequency_hz = torch_module.sum(peak_weights * frequency_grid, dim=1)
 
+    # Use the same soft dominant-peak assignment to measure raw peak amplitude in dB.
+    # This makes the training surrogate explicitly care about the dominant-peak power
+    # that the deployment score already penalizes.
+    peak_power_linear = torch_module.sum(peak_weights * frames, dim=1)
+    peak_power_db = 10.0 * torch_module.log10(torch_module.clamp(peak_power_linear, min=1.0e-12))
+
     frame_mass = torch_module.sum(frames, dim=1)
     safe_frame_mass = torch_module.clamp(frame_mass, min=1.0e-12)
     centroid_hz = torch_module.sum(frames * frequency_grid, dim=1) / safe_frame_mass
@@ -374,6 +382,7 @@ def _torch_extract_illustrative_features(
 
     return TorchIllustrativeFeatureBatch(
         peak_frequency_hz=peak_frequency_hz,
+        peak_power_db=peak_power_db,
         spectral_centroid_hz=centroid_hz,
         occupied_bandwidth_hz=occupied_bandwidth_hz,
     )
@@ -391,6 +400,10 @@ def _torch_feature_preservation_loss(
         reference_features.peak_frequency_hz - reconstructed_features.peak_frequency_hz,
         delta=config.huber_delta,
     )
+    peak_power_term = _torch_huber(
+        reference_features.peak_power_db - reconstructed_features.peak_power_db,
+        delta=config.huber_delta,
+    )
     centroid_term = _torch_huber(
         reference_features.spectral_centroid_hz
         - reconstructed_features.spectral_centroid_hz,
@@ -403,6 +416,7 @@ def _torch_feature_preservation_loss(
     )
     weighted = (
         config.peak_weight * peak_term
+        + config.peak_power_weight * peak_power_term
         + config.centroid_weight * centroid_term
         + config.bandwidth_weight * bandwidth_term
     )

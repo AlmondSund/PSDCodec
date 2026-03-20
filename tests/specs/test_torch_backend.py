@@ -53,3 +53,23 @@ def test_torch_full_codec_preserves_public_shape_contract() -> None:
     assert output.quantized_latents.shape == (4, config.latent_vector_count, config.embedding_dim)
     assert output.rate_bits.shape == (4,)
     assert output.vq_loss.shape == ()
+
+
+def test_torch_encoder_bounds_pre_quantization_latents_for_vq_stability() -> None:
+    """The encoder should emit bounded latents so VQ distances stay well-conditioned."""
+    torch = pytest.importorskip("torch")
+    config = TorchCodecConfig(
+        reduced_bin_count=32,
+        latent_vector_count=8,
+        embedding_dim=4,
+        codebook_size=16,
+        hidden_dim=12,
+        residual_block_count=2,
+        convolution_kernel_size=3,
+    )
+    model = TorchFullCodec(config)
+    normalized_frames = torch.randn(6, config.reduced_bin_count, dtype=torch.float32)
+
+    latents = model.encode_pre_quantization(normalized_frames)
+
+    assert torch.all(latents.abs() <= 1.0 + 1.0e-6)
