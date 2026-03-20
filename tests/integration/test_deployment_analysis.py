@@ -15,6 +15,10 @@ from codec.exceptions import CodecConfigurationError
 from data.campaigns import CampaignDatasetBundle
 from interfaces.deployment import (
     DeploymentArtifacts,
+    DeploymentBatchReport,
+    DeploymentBatchSummary,
+    DeploymentReadinessAssessment,
+    build_deployment_demo_summary_rows,
     create_deployment_service,
     evaluate_deployment_batch,
     load_campaign_frame_samples,
@@ -209,3 +213,66 @@ def test_load_campaign_frame_samples_accepts_campaign_and_node_overrides(
     assert observed_arguments["include_campaign_globs"] == ["ANTENNA_sweep"]
     assert observed_arguments["exclude_campaign_globs"] == ["RBW_*"]
     assert observed_arguments["include_node_globs"] == ["Node1.csv"]
+
+
+def test_build_deployment_demo_summary_rows_reports_demo_dimensions(tmp_path: Path) -> None:
+    """Notebook summary rows should expose the structural demo dimensions clearly."""
+    config = TrainingExperimentConfig.from_yaml(Path("configs/experiments/demo.yaml"))
+    export_dir = tmp_path / "models" / "exports" / "demo"
+    export_dir.mkdir(parents=True)
+
+    artifacts = DeploymentArtifacts(
+        export_dir=export_dir,
+        runtime_asset_dir=export_dir / "runtime_assets",
+        onnx_path=export_dir / "encoder.onnx",
+        checkpoint_path=export_dir / "best.pt",
+        runtime_config=config.runtime,
+        experiment_config=config,
+        codebook=np.zeros(
+            (config.model.codebook_size, config.model.embedding_dim),
+            dtype=np.float64,
+        ),
+        probabilities=None,
+    )
+    batch_report = DeploymentBatchReport(
+        frame_reports=(),
+        summary=DeploymentBatchSummary(
+            frame_count=48,
+            all_roundtrip_equal=True,
+            packet_bits_mean=900.0,
+            packet_bits_std=12.0,
+            packet_bits_min=880,
+            packet_bits_max=920,
+            rate_proxy_bits_mean=905.0,
+            rate_proxy_bits_std=11.0,
+            psd_distortion_mean=0.01,
+            psd_distortion_std=0.001,
+            psd_distortion_min=0.008,
+            psd_distortion_max=0.013,
+            preprocessing_distortion_mean=0.009,
+            codec_distortion_mean=0.002,
+            peak_frequency_error_hz_mean=10_000.0,
+            peak_frequency_error_hz_max=20_000.0,
+            peak_power_error_db_mean=0.5,
+            peak_power_error_db_max=1.0,
+            task_distortion_mean=0.2,
+        ),
+        assessment=DeploymentReadinessAssessment(
+            verdict="deployment_good",
+            reasons=("Synthetic deployment summary.",),
+        ),
+    )
+
+    rows = build_deployment_demo_summary_rows(artifacts, batch_report=batch_report)
+    row_map = {(row["section"], row["metric"]): row["value"] for row in rows}
+
+    assert row_map[("Spectrum", "Original PSD bins N")] == 4096
+    assert row_map[("Spectrum", "Preprocessed bins N_r")] == 1024
+    assert row_map[("Spectrum", "Deterministic reduction N / N_r")] == pytest.approx(4.0)
+    assert row_map[("Latent", "Latent tensor shape")] == "512 x 8"
+    assert row_map[("Latent", "Continuous latent scalar count M*d")] == 4096
+    assert row_map[("VQ", "Codebook size J")] == 512
+    assert row_map[("Packet", "Deterministic side-information bits")] == 704
+    assert row_map[("Observed batch", "Mean bits per original PSD bin")] == pytest.approx(
+        900.0 / 4096.0
+    )

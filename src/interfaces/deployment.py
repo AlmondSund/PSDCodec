@@ -171,6 +171,210 @@ class DeploymentBatchReport:
     assessment: DeploymentReadinessAssessment  # Qualitative readiness triage
 
 
+def build_deployment_demo_summary_rows(
+    artifacts: DeploymentArtifacts,
+    *,
+    batch_report: DeploymentBatchReport | None = None,
+) -> tuple[dict[str, str | int | float], ...]:
+    """Return notebook-friendly analytical rows describing one deployment demo.
+
+    Purpose:
+        The deployment notebook is easier to interpret when the codec boundary is
+        made explicit in concrete dimensions. This helper turns the exported config
+        and, optionally, one evaluated batch report into a compact structural summary
+        covering spectrum size, latent shape, packet side information, and observed
+        bitrate density.
+
+    Args:
+        artifacts: Deployment artifact bundle created from one trained export directory.
+        batch_report: Optional evaluated batch report whose mean packet statistics are
+            folded into the analytical summary.
+
+    Returns:
+        A tuple of row dictionaries intended for direct display as a pandas frame in
+        the deployment notebook.
+    """
+    original_bin_count = _resolve_deployment_original_bin_count(artifacts)
+    preprocessing_config = artifacts.runtime_config.preprocessing
+    model_config = artifacts.experiment_config.model
+    entropy_config = artifacts.runtime_config.entropy_model
+
+    reduced_bin_count = preprocessing_config.resolve_reduced_bin_count(original_bin_count)
+    latent_scalar_count = model_config.latent_vector_count * model_config.embedding_dim
+    side_information_bits_total = (
+        preprocessing_config.block_count * preprocessing_config.side_information_bits_per_block
+    )
+    codebook_shape = f"{artifacts.codebook.shape[0]} x {artifacts.codebook.shape[1]}"
+
+    rows: list[dict[str, str | int | float]] = [
+        {
+            "section": "Spectrum",
+            "metric": "Original PSD bins N",
+            "value": original_bin_count,
+            "units": "bins",
+        },
+        {
+            "section": "Spectrum",
+            "metric": "Preprocessed bins N_r",
+            "value": reduced_bin_count,
+            "units": "bins",
+        },
+        {
+            "section": "Spectrum",
+            "metric": "Deterministic reduction N / N_r",
+            "value": original_bin_count / reduced_bin_count,
+            "units": "x",
+        },
+        {
+            "section": "Latent",
+            "metric": "Latent positions M",
+            "value": model_config.latent_vector_count,
+            "units": "vectors",
+        },
+        {
+            "section": "Latent",
+            "metric": "Embedding dimension d",
+            "value": model_config.embedding_dim,
+            "units": "scalars/vector",
+        },
+        {
+            "section": "Latent",
+            "metric": "Latent tensor shape",
+            "value": f"{model_config.latent_vector_count} x {model_config.embedding_dim}",
+            "units": "M x d",
+        },
+        {
+            "section": "Latent",
+            "metric": "Continuous latent scalar count M*d",
+            "value": latent_scalar_count,
+            "units": "scalars",
+        },
+        {
+            "section": "VQ",
+            "metric": "Codebook size J",
+            "value": model_config.codebook_size,
+            "units": "codewords",
+        },
+        {
+            "section": "VQ",
+            "metric": "Runtime codebook shape",
+            "value": codebook_shape,
+            "units": "J x d",
+        },
+        {
+            "section": "VQ",
+            "metric": "Index symbols per frame",
+            "value": model_config.latent_vector_count,
+            "units": "symbols",
+        },
+        {
+            "section": "Backbone",
+            "metric": "Hidden channels",
+            "value": model_config.hidden_dim,
+            "units": "channels",
+        },
+        {
+            "section": "Backbone",
+            "metric": "Residual blocks per stage",
+            "value": model_config.residual_block_count,
+            "units": "blocks",
+        },
+        {
+            "section": "Backbone",
+            "metric": "Convolution kernel size",
+            "value": model_config.convolution_kernel_size,
+            "units": "bins",
+        },
+        {
+            "section": "Packet",
+            "metric": "Standardization blocks B",
+            "value": preprocessing_config.block_count,
+            "units": "blocks",
+        },
+        {
+            "section": "Packet",
+            "metric": "Side-information bits per block",
+            "value": preprocessing_config.side_information_bits_per_block,
+            "units": "bits/block",
+        },
+        {
+            "section": "Packet",
+            "metric": "Deterministic side-information bits",
+            "value": side_information_bits_total,
+            "units": "bits/frame",
+        },
+        {
+            "section": "Packet",
+            "metric": "Mean quantizer bits",
+            "value": preprocessing_config.mean_quantizer.bits,
+            "units": "bits",
+        },
+        {
+            "section": "Packet",
+            "metric": "Log-sigma quantizer bits",
+            "value": preprocessing_config.log_sigma_quantizer.bits,
+            "units": "bits",
+        },
+        {
+            "section": "Entropy",
+            "metric": "Index alphabet size",
+            "value": entropy_config.alphabet_size,
+            "units": "symbols",
+        },
+        {
+            "section": "Entropy",
+            "metric": "Arithmetic precision",
+            "value": entropy_config.precision_bits,
+            "units": "bits",
+        },
+    ]
+
+    if batch_report is not None:
+        packet_bits_mean = batch_report.summary.packet_bits_mean
+        rows.extend(
+            (
+                {
+                    "section": "Observed batch",
+                    "metric": "Evaluated frames",
+                    "value": batch_report.summary.frame_count,
+                    "units": "frames",
+                },
+                {
+                    "section": "Observed batch",
+                    "metric": "Mean operational packet size",
+                    "value": packet_bits_mean,
+                    "units": "bits/frame",
+                },
+                {
+                    "section": "Observed batch",
+                    "metric": "Mean bits per original PSD bin",
+                    "value": packet_bits_mean / original_bin_count,
+                    "units": "bits/bin",
+                },
+                {
+                    "section": "Observed batch",
+                    "metric": "Mean bits per reduced bin",
+                    "value": packet_bits_mean / reduced_bin_count,
+                    "units": "bits/bin",
+                },
+                {
+                    "section": "Observed batch",
+                    "metric": "Mean bits per latent index",
+                    "value": packet_bits_mean / model_config.latent_vector_count,
+                    "units": "bits/symbol",
+                },
+                {
+                    "section": "Observed batch",
+                    "metric": "Deterministic side-information share",
+                    "value": 100.0 * side_information_bits_total / packet_bits_mean,
+                    "units": "%",
+                },
+            )
+        )
+
+    return tuple(rows)
+
+
 @dataclass
 class OnnxTorchDeploymentModel:
     """Deployment adapter using ONNX Runtime for encode and PyTorch for decode.
@@ -578,6 +782,28 @@ def _resolve_glob_selection(
     if not allow_empty and not resolved_globs:
         raise CodecConfigurationError(f"{field_name} must contain at least one glob.")
     return resolved_globs
+
+
+def _resolve_deployment_original_bin_count(
+    artifacts: DeploymentArtifacts,
+) -> int:
+    """Resolve the harmonized original PSD length for notebook-facing summaries.
+
+    Purpose:
+        Export bundles may record a prepared `.npz` dataset in `training_summary.json`
+        even when the notebook still relies on the raw campaign-sidecar config for
+        deployment diagnostics. This helper mirrors that fallback so structural
+        summaries and frame loading agree on the original PSD dimensionality.
+    """
+    try:
+        return artifacts.original_bin_count
+    except CodecConfigurationError:
+        dataset_config = _resolve_campaign_dataset_config(artifacts)
+        if dataset_config.campaign_target_bin_count is None:
+            raise CodecConfigurationError(
+                "Campaign-backed deployment summaries require campaign_target_bin_count.",
+            ) from None
+        return int(dataset_config.campaign_target_bin_count)
 
 
 def _load_exported_source_config_if_present(
