@@ -67,6 +67,25 @@ class TrainingLossBreakdown:
     task_loss: float
 
 
+def _detach_scalar_values_to_host(
+    *values: Tensor,
+) -> tuple[float, ...]:
+    """Return scalar tensor values as Python floats using one host synchronization.
+
+    Purpose:
+        Training reports several scalar loss components per batch. Pulling each
+        component to the host with its own `.item()` call forces repeated device
+        synchronizations on CUDA runs. This helper stacks the scalars first so the
+        hot path pays only one host transfer per batch.
+    """
+    torch_module = _require_torch()
+    detached_scalars = torch_module.stack(
+        [value.detach().reshape(()) for value in values]
+    )
+    host_values = detached_scalars.to(device="cpu", dtype=torch_module.float64)
+    return tuple(float(value) for value in host_values.tolist())
+
+
 @dataclass(frozen=True)
 class TorchIllustrativeFeatureBatch:
     """Differentiable illustrative-feature surrogate evaluated over one batch."""
@@ -190,7 +209,15 @@ def compose_rate_distortion_loss(
     weights: RateDistortionLossConfig,
     task_loss: Tensor | None = None,
 ) -> tuple[Tensor, TrainingLossBreakdown]:
-    """Compose the weighted training objective and return detached scalar metrics."""
+    """Compose the weighted training objective and return detached scalar metrics.
+
+    Purpose:
+        The returned tensor drives backpropagation, while the scalar breakdown feeds
+        epoch-level logging and checkpoint-selection metrics. The reporting path is
+        intentionally detached from autograd and uses a single host transfer for the
+        tensor-valued scalars so accelerator runs do not stall on repeated `.item()`
+        synchronizations.
+    """
     torch_module = _require_torch()
     psd_loss = torch_log_spectral_distortion(
         reference_frames,
@@ -210,13 +237,26 @@ def compose_rate_distortion_loss(
         + weights.vq_weight * vq_loss
         + weights.task_weight * total_task_loss
     )
+    (
+        total_loss_scalar,
+        psd_loss_scalar,
+        rate_bits_scalar,
+        vq_loss_scalar,
+        task_loss_scalar,
+    ) = _detach_scalar_values_to_host(
+        total_loss,
+        psd_loss,
+        average_rate_bits,
+        vq_loss,
+        total_task_loss,
+    )
     return total_loss, TrainingLossBreakdown(
-        total_loss=float(total_loss.detach().cpu().item()),
-        psd_loss=float(psd_loss.detach().cpu().item()),
-        rate_bits=float(average_rate_bits.detach().cpu().item()),
+        total_loss=total_loss_scalar,
+        psd_loss=psd_loss_scalar,
+        rate_bits=rate_bits_scalar,
         side_information_bits=average_side_information_bits,
-        vq_loss=float(vq_loss.detach().cpu().item()),
-        task_loss=float(total_task_loss.detach().cpu().item()),
+        vq_loss=vq_loss_scalar,
+        task_loss=task_loss_scalar,
     )
 
 

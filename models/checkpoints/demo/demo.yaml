@@ -49,15 +49,12 @@ runtime:
 model:
   reduced_bin_count: 1024
   # The preprocessing-only baseline is already strong, so the learned stage needs
-  # more discrete support than the earlier 256-token bottleneck. The PyTorch
-  # backbone is now convolutional, so the width parameter governs local spectral
-  # feature channels rather than a flat MLP layer.
+  # more discrete support than the earlier 256-token bottleneck to preserve narrow
+  # peaks instead of smearing them across the decoder MLP.
   latent_vector_count: 512
   embedding_dim: 8
   codebook_size: 512
-  hidden_dim: 128
-  residual_block_count: 4
-  convolution_kernel_size: 7
+  hidden_dim: 2048
   commitment_weight: 0.25
 
 training:

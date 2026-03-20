@@ -7,11 +7,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from codec.exceptions import CodecConfigurationError
+
 try:
     import torch
     import torch.nn as nn
+    import torch.nn.functional as functional
 except ImportError:  # pragma: no cover - exercised only when torch is unavailable
     torch = None
+    functional = None
     nn = None
 
 
@@ -23,11 +27,93 @@ class TorchCodecConfig:
     latent_vector_count: int  # Number of latent positions M
     embedding_dim: int  # Latent dimension d
     codebook_size: int  # Number of VQ codewords J
-    hidden_dim: int = 256  # Width of the shared MLP hidden representation
+    hidden_dim: int = 256  # Width of the shared convolutional feature representation
+    residual_block_count: int = 4  # Number of residual spectral blocks per encoder/decoder
+    convolution_kernel_size: int = 7  # Odd local receptive field width in frequency bins
     commitment_weight: float = 0.25  # β_com in the manuscript
+
+    def __post_init__(self) -> None:
+        """Validate codec dimensions and local-backbone hyperparameters."""
+        if self.reduced_bin_count <= 0:
+            raise CodecConfigurationError("reduced_bin_count must be strictly positive.")
+        if self.latent_vector_count <= 0:
+            raise CodecConfigurationError("latent_vector_count must be strictly positive.")
+        if self.embedding_dim <= 0:
+            raise CodecConfigurationError("embedding_dim must be strictly positive.")
+        if self.codebook_size <= 0:
+            raise CodecConfigurationError("codebook_size must be strictly positive.")
+        if self.hidden_dim <= 0:
+            raise CodecConfigurationError("hidden_dim must be strictly positive.")
+        if self.residual_block_count <= 0:
+            raise CodecConfigurationError("residual_block_count must be strictly positive.")
+        if self.convolution_kernel_size <= 0 or self.convolution_kernel_size % 2 == 0:
+            raise CodecConfigurationError(
+                "convolution_kernel_size must be a strictly positive odd integer.",
+            )
+        if self.commitment_weight < 0.0:
+            raise CodecConfigurationError("commitment_weight must be non-negative.")
 
 
 if torch is not None:
+
+    def _resolve_group_norm_group_count(
+        channel_count: int,
+    ) -> int:
+        """Return a valid `GroupNorm` group count that divides `channel_count`.
+
+        Purpose:
+            The convolutional backbone should behave consistently across small test
+            models and larger demo configurations. This helper therefore chooses the
+            largest reasonable group count up to eight that exactly divides the channel
+            width, falling back to instance-like normalization when needed.
+        """
+        for candidate in range(min(8, channel_count), 0, -1):
+            if channel_count % candidate == 0:
+                return candidate
+        return 1
+
+
+    class TorchResidualConvBlock(nn.Module):
+        """Local residual block that preserves neighborhood structure in PSD space."""
+
+        def __init__(
+            self,
+            channel_count: int,  # Number of feature channels carried by the block
+            *,
+            kernel_size: int,  # Odd convolutional receptive field width
+        ) -> None:
+            """Build one normalization-convolution residual block."""
+            super().__init__()
+            padding = kernel_size // 2
+            group_count = _resolve_group_norm_group_count(channel_count)
+            self.pre_norm = nn.GroupNorm(group_count, channel_count)
+            self.mid_norm = nn.GroupNorm(group_count, channel_count)
+            self.activation = nn.GELU()
+            self.conv1 = nn.Conv1d(
+                channel_count,
+                channel_count,
+                kernel_size=kernel_size,
+                padding=padding,
+            )
+            self.conv2 = nn.Conv1d(
+                channel_count,
+                channel_count,
+                kernel_size=kernel_size,
+                padding=padding,
+            )
+
+        def forward(
+            self,
+            spectral_features: torch.Tensor,  # Batched local spectral features [batch, C, N]
+        ) -> torch.Tensor:
+            """Refine spectral features while preserving a residual identity path."""
+            residual = spectral_features
+            normalized = self.pre_norm(spectral_features)
+            transformed = self.conv1(normalized)
+            transformed = self.activation(transformed)
+            transformed = self.mid_norm(transformed)
+            transformed = self.conv2(transformed)
+            return residual + transformed
 
     @dataclass(frozen=True)
     class TorchVectorQuantizationOutput:
@@ -68,48 +154,119 @@ if torch is not None:
                 torch.tensor(2.0, device=indices.device, dtype=log_probabilities.dtype)
             )
 
-    class TorchMlpEncoder(nn.Module):
-        """Inference-time encoder E_θ producing latent vectors before VQ assignment."""
+    class TorchSpectralEncoder(nn.Module):
+        """Convolutional encoder preserving local PSD structure before VQ assignment."""
 
         def __init__(self, config: TorchCodecConfig) -> None:
-            """Build the MLP encoder used during training and export."""
+            """Build the locality-preserving encoder used during training and export.
+
+            Purpose:
+                Narrow spectral peaks are strongly local in frequency, so a flat MLP
+                discards the most useful inductive bias for this domain. The encoder
+                therefore operates on `[batch, 1, N_r]` feature maps, refines them
+                through residual 1D convolutions, and only then pools them into the
+                `M` latent positions consumed by vector quantization.
+            """
             super().__init__()
-            latent_width = config.latent_vector_count * config.embedding_dim
             self.reduced_bin_count = config.reduced_bin_count
             self.latent_vector_count = config.latent_vector_count
             self.embedding_dim = config.embedding_dim
-            self.network = nn.Sequential(
-                nn.Linear(config.reduced_bin_count, config.hidden_dim),
-                nn.GELU(),
-                nn.Linear(config.hidden_dim, config.hidden_dim),
-                nn.GELU(),
-                nn.Linear(config.hidden_dim, latent_width),
+            padding = config.convolution_kernel_size // 2
+            group_count = _resolve_group_norm_group_count(config.hidden_dim)
+            self.input_projection = nn.Conv1d(
+                1,
+                config.hidden_dim,
+                kernel_size=config.convolution_kernel_size,
+                padding=padding,
             )
+            self.residual_blocks = nn.Sequential(
+                *[
+                    TorchResidualConvBlock(
+                        config.hidden_dim,
+                        kernel_size=config.convolution_kernel_size,
+                    )
+                    for _ in range(config.residual_block_count)
+                ]
+            )
+            self.output_norm = nn.GroupNorm(group_count, config.hidden_dim)
+            self.output_activation = nn.GELU()
+            self.output_projection = nn.Conv1d(config.hidden_dim, config.embedding_dim, 1)
+            self.input_skip_projection = nn.Conv1d(1, config.embedding_dim, 1)
+            self.latent_pool = nn.AdaptiveAvgPool1d(config.latent_vector_count)
 
         def forward(self, normalized_frames: torch.Tensor) -> torch.Tensor:
             """Encode batched normalized frames into `[batch, M, d]` latents."""
-            latents = self.network(normalized_frames)
-            return latents.view(-1, self.latent_vector_count, self.embedding_dim)
+            spectral_input = normalized_frames.unsqueeze(1)
+            spectral_features = self.input_projection(spectral_input)
+            spectral_features = self.residual_blocks(spectral_features)
+            spectral_features = self.output_norm(spectral_features)
+            spectral_features = self.output_activation(spectral_features)
+            latent_features = self.output_projection(spectral_features)
+            latent_features = self.latent_pool(latent_features)
+            latent_skip = self.latent_pool(self.input_skip_projection(spectral_input))
+            return (latent_features + latent_skip).transpose(1, 2).contiguous()
 
-    class TorchMlpDecoder(nn.Module):
-        """Decoder G_φ reconstructing normalized frames from quantized latents."""
+    class TorchSpectralDecoder(nn.Module):
+        """Convolutional decoder reconstructing normalized frames from local latents."""
 
         def __init__(self, config: TorchCodecConfig) -> None:
-            """Build the MLP decoder."""
+            """Build the locality-preserving decoder.
+
+            Purpose:
+                The decoder first mixes information locally across neighboring latent
+                positions, then interpolates those features back onto the full
+                frequency grid. This keeps the reconstruction path aligned with the
+                underlying PSD geometry instead of asking one dense layer to memorize
+                every peak interaction globally.
+            """
             super().__init__()
-            latent_width = config.latent_vector_count * config.embedding_dim
-            self.network = nn.Sequential(
-                nn.Linear(latent_width, config.hidden_dim),
-                nn.GELU(),
-                nn.Linear(config.hidden_dim, config.hidden_dim),
-                nn.GELU(),
-                nn.Linear(config.hidden_dim, config.reduced_bin_count),
+            padding = config.convolution_kernel_size // 2
+            group_count = _resolve_group_norm_group_count(config.hidden_dim)
+            self.reduced_bin_count = config.reduced_bin_count
+            self.input_projection = nn.Conv1d(config.embedding_dim, config.hidden_dim, 1)
+            self.output_skip_projection = nn.Conv1d(config.embedding_dim, 1, 1)
+            self.residual_blocks = nn.Sequential(
+                *[
+                    TorchResidualConvBlock(
+                        config.hidden_dim,
+                        kernel_size=config.convolution_kernel_size,
+                    )
+                    for _ in range(config.residual_block_count)
+                ]
+            )
+            self.output_norm = nn.GroupNorm(group_count, config.hidden_dim)
+            self.output_activation = nn.GELU()
+            self.output_projection = nn.Conv1d(
+                config.hidden_dim,
+                1,
+                kernel_size=config.convolution_kernel_size,
+                padding=padding,
             )
 
         def forward(self, quantized_latents: torch.Tensor) -> torch.Tensor:
             """Decode batched latent tensors into normalized frames with length N_r."""
-            latent_flat = quantized_latents.reshape(quantized_latents.shape[0], -1)
-            return self.network(latent_flat)
+            latent_features = quantized_latents.transpose(1, 2).contiguous()
+            spectral_features = self.input_projection(latent_features)
+
+            # Expand the latent grid back to the reduced PSD resolution while keeping
+            # the interpolation deterministic for ONNX export and runtime tracing.
+            spectral_features = functional.interpolate(
+                spectral_features,
+                size=self.reduced_bin_count,
+                mode="linear",
+                align_corners=False,
+            )
+            spectral_features = self.residual_blocks(spectral_features)
+            spectral_features = self.output_norm(spectral_features)
+            spectral_features = self.output_activation(spectral_features)
+            reconstructed = self.output_projection(spectral_features)
+            reconstructed_skip = functional.interpolate(
+                self.output_skip_projection(latent_features),
+                size=self.reduced_bin_count,
+                mode="linear",
+                align_corners=False,
+            )
+            return (reconstructed + reconstructed_skip).squeeze(1)
 
     class TorchVectorQuantizer(nn.Module):
         """Codebook lookup with straight-through gradient estimation."""
@@ -169,13 +326,13 @@ if torch is not None:
             """Construct encoder, vector quantizer, and decoder modules."""
             super().__init__()
             self.config = config
-            self.encoder = TorchMlpEncoder(config)
+            self.encoder = TorchSpectralEncoder(config)
             self.vector_quantizer = TorchVectorQuantizer(
                 codebook_size=config.codebook_size,
                 embedding_dim=config.embedding_dim,
                 commitment_weight=config.commitment_weight,
             )
-            self.decoder = TorchMlpDecoder(config)
+            self.decoder = TorchSpectralDecoder(config)
             self.entropy_model = TorchFactorizedEntropyModel(config.codebook_size)
 
         def encode_pre_quantization(self, normalized_frames: torch.Tensor) -> torch.Tensor:
@@ -277,14 +434,21 @@ else:  # pragma: no cover - exercised only when torch is unavailable
             """Reject construction without PyTorch."""
             raise ImportError("PyTorch is required to use the torch_backend module.")
 
-    class TorchMlpEncoder:
+    class TorchResidualConvBlock:
         """Placeholder class raised when PyTorch is unavailable."""
 
         def __init__(self, *_args: Any, **_kwargs: Any) -> None:
             """Reject construction without PyTorch."""
             raise ImportError("PyTorch is required to use the torch_backend module.")
 
-    class TorchMlpDecoder:
+    class TorchSpectralEncoder:
+        """Placeholder class raised when PyTorch is unavailable."""
+
+        def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+            """Reject construction without PyTorch."""
+            raise ImportError("PyTorch is required to use the torch_backend module.")
+
+    class TorchSpectralDecoder:
         """Placeholder class raised when PyTorch is unavailable."""
 
         def __init__(self, *_args: Any, **_kwargs: Any) -> None:

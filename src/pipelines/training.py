@@ -89,24 +89,37 @@ def _require_torch() -> Any:
     return _torch
 
 
-def _raise_if_non_finite_tensor(
-    value: Tensor,  # Tensor whose entries must all be finite
-    *,
-    name: str,
+def _raise_if_non_finite_tensors(
+    named_values: dict[str, Tensor],  # Named tensors whose entries must all be finite
 ) -> None:
-    """Raise a precise floating-point error when a tensor contains NaN or Inf.
+    """Raise a precise floating-point error when any tensor contains NaN or Inf.
 
     Purpose:
-        Surface numerical instability at the training boundary where it first becomes
-        observable, instead of letting non-finite tensors fail later inside monitoring
-        or serialization code with a less actionable traceback.
+        Training still needs explicit non-finite guards, but calling `.item()` for
+        every intermediate tensor forces repeated accelerator synchronizations. This
+        helper reduces the common-case overhead to one device-to-host check, then
+        falls back to per-tensor diagnosis only on the rare failure path.
     """
     torch_module = _require_torch()
-    if not bool(torch_module.isfinite(value).all().item()):
-        raise FloatingPointError(
-            f"{name} contains non-finite values. This indicates numerical instability "
-            "in the training path before exact task monitoring.",
-        )
+    if not named_values:
+        return
+
+    finite_checks = torch_module.stack(
+        [torch_module.isfinite(value).all() for value in named_values.values()]
+    )
+    if bool(finite_checks.all().item()):
+        return
+
+    non_finite_names = [
+        name
+        for name, value in named_values.items()
+        if not bool(torch_module.isfinite(value).all().item())
+    ]
+    joined_names = ", ".join(non_finite_names)
+    raise FloatingPointError(
+        "The training path produced non-finite tensors before exact task monitoring. "
+        f"Affected tensors: {joined_names}.",
+    )
 
 
 @dataclass(frozen=True)
@@ -359,6 +372,8 @@ class EpochProgressUpdate:
     total_epoch_count: int  # Total epochs requested by the experiment
     remaining_epoch_count: int  # Epochs still pending after this update
     selection_metric: str  # Metric used to choose the best checkpoint
+    current_selection_score: float | None  # Current epoch score for the selected metric
+    selection_candidate_accepted: bool  # Whether this epoch may replace the persisted best
     best_selection_score: float  # Best score seen so far for the selected metric
     best_validation_loss: float  # Best validation loss observed so far
 
@@ -707,6 +722,8 @@ class TorchCodecTrainer:
                             self.experiment_config.training.epoch_count - epoch_index - 1
                         ),
                         selection_metric=self.experiment_config.artifacts.selection_metric,
+                        current_selection_score=selection_score,
+                        selection_candidate_accepted=is_acceptable_candidate,
                         best_selection_score=best_selection_score,
                         best_validation_loss=best_validation_loss,
                     )
@@ -802,20 +819,10 @@ class TorchCodecTrainer:
                 )
                 rate_bits = output.rate_bits.to(dtype=torch_module.float32)
                 vq_loss = output.vq_loss.to(dtype=torch_module.float32)
-                _raise_if_non_finite_tensor(
-                    reconstructed_normalized_frames,
-                    name="reconstructed_normalized_frames",
-                )
-                _raise_if_non_finite_tensor(rate_bits, name="rate_bits")
-                _raise_if_non_finite_tensor(vq_loss, name="vq_loss")
                 reconstructed_frames = inverse_preprocessor.inverse_preprocess_batch(
                     reconstructed_normalized_frames,
                     tensor_batch.side_means,
                     tensor_batch.side_log_sigmas,
-                )
-                _raise_if_non_finite_tensor(
-                    reconstructed_frames,
-                    name="reconstructed_frames",
                 )
                 task_loss_tensor = None
                 if (
@@ -835,7 +842,6 @@ class TorchCodecTrainer:
                         frequency_grid_hz=task_frequency_grid_hz,
                         config=self.experiment_config.task,
                     )
-                    _raise_if_non_finite_tensor(task_loss_tensor, name="task_loss")
                 total_loss, breakdown = compose_rate_distortion_loss(
                     reference_frames=tensor_batch.original_frames,
                     reconstructed_frames=reconstructed_frames,
@@ -846,7 +852,16 @@ class TorchCodecTrainer:
                     weights=self.experiment_config.training.loss,
                     task_loss=task_loss_tensor,
                 )
-                _raise_if_non_finite_tensor(total_loss, name="total_loss")
+                checked_tensors = {
+                    "reconstructed_normalized_frames": reconstructed_normalized_frames,
+                    "rate_bits": rate_bits,
+                    "vq_loss": vq_loss,
+                    "reconstructed_frames": reconstructed_frames,
+                    "total_loss": total_loss,
+                }
+                if task_loss_tensor is not None:
+                    checked_tensors["task_loss"] = task_loss_tensor
+                _raise_if_non_finite_tensors(checked_tensors)
 
                 if training:
                     self.optimizer.zero_grad(set_to_none=True)
@@ -870,11 +885,16 @@ class TorchCodecTrainer:
                         self.optimizer.step()
 
             batch_size = tensor_batch.original_frames.shape[0]
-            validation_diagnostics = self._compute_validation_diagnostics(
-                batch,
-                reconstructed_frames.detach().cpu().numpy(),
-                dataset_frequency_grid_hz,
-            )
+            validation_diagnostics = None
+            if not training:
+                # Exact deployment-aligned diagnostics are intentionally validation-only.
+                # Running them on training batches forces a GPU->CPU round-trip and
+                # NumPy-side analysis on every optimizer step without affecting the loss.
+                validation_diagnostics = self._compute_validation_diagnostics(
+                    batch,
+                    reconstructed_frames.detach().cpu().numpy(),
+                    dataset_frequency_grid_hz,
+                )
             aggregated.update(
                 breakdown,
                 batch_size=batch_size,

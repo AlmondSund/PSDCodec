@@ -48,29 +48,22 @@ runtime:
 
 model:
   reduced_bin_count: 1024
-  # The preprocessing-only baseline is already strong, so the learned stage needs
-  # more discrete support than the earlier 256-token bottleneck. The PyTorch
-  # backbone is now convolutional, so the width parameter governs local spectral
-  # feature channels rather than a flat MLP layer.
-  latent_vector_count: 512
+  latent_vector_count: 256
   embedding_dim: 8
   codebook_size: 512
-  hidden_dim: 128
-  residual_block_count: 4
-  convolution_kernel_size: 7
+  hidden_dim: 1024
   commitment_weight: 0.25
 
 training:
   # This canonical demo run prioritizes deployment fidelity over aggressive
   # compression. The deployment notebook showed that the learned stage was still
-  # losing narrow peaks, and the high-batch throughput experiment stayed worse than
-  # preprocessing-only on every monitored component. Now that the training hot path
-  # no longer wastes time on CPU-side validation diagnostics, the demo reverts to a
-  # quality-first profile: a smaller batch for more optimizer steps per epoch, plus
-  # a wider model and more latent positions so the learned stage is not forced into
-  # an unnecessarily destructive bottleneck.
+  # losing narrow peaks, so the bitrate penalty is relaxed and the task term is
+  # made stronger than in the previous quality-first attempt. The runtime settings
+  # below are intentionally accelerator-oriented: the demo should saturate CUDA
+  # hardware with a materially larger batch, reduced-precision matmuls, and a
+  # compiled training graph instead of idling with tiny batches on float32.
   epoch_count: 100
-  batch_size: 128
+  batch_size: 256
   learning_rate: 2.0e-4
   weight_decay: 1.0e-5
   gradient_clip_norm: 1.0

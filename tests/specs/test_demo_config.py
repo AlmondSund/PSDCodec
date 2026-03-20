@@ -5,11 +5,12 @@ from __future__ import annotations
 import importlib.util
 import os
 from pathlib import Path
+from types import ModuleType
 
 from pipelines.training import TrainingConfig, TrainingExperimentConfig
 
 
-def _load_train_demo_module() -> object:
+def _load_train_demo_module() -> ModuleType:
     """Import the demo-training entrypoint module for helper-level tests."""
     module_path = Path("scripts/jobs/train_demo.py")
     spec = importlib.util.spec_from_file_location("test_train_demo_module", module_path)
@@ -34,10 +35,13 @@ def test_demo_yaml_points_to_the_canonical_manuscript_run() -> None:
     assert config.runtime.preprocessing.block_count == 32
     assert config.runtime.entropy_model.alphabet_size == 512
     assert config.model.reduced_bin_count == 1024
-    assert config.model.latent_vector_count == 256
+    assert config.model.latent_vector_count == 512
     assert config.model.codebook_size == 512
+    assert config.model.hidden_dim == 128
+    assert config.model.residual_block_count == 4
+    assert config.model.convolution_kernel_size == 7
     assert config.training.device == "auto"
-    assert config.training.batch_size == 64
+    assert config.training.batch_size == 128
     assert config.training.mixed_precision == "auto"
     assert config.training.enable_model_compile
     assert config.artifacts.latest_checkpoint_interval == 10
@@ -72,30 +76,25 @@ def test_demo_dataset_cache_path_depends_on_dataset_and_preprocessing_config() -
 
 
 def test_demo_dataset_cache_detects_raw_data_freshness(tmp_path: Path) -> None:
-    """The demo cache should rebuild when raw campaigns or the YAML config are newer."""
+    """The demo cache should rebuild only when raw campaigns are newer."""
     module = _load_train_demo_module()
     campaign_root = tmp_path / "campaigns"
     campaign_root.mkdir()
     node_file = campaign_root / "Node1.csv"
     node_file.write_text("pxx\n[]\n", encoding="utf-8")
-    config_path = tmp_path / "demo.yaml"
-    config_path.write_text("demo: true\n", encoding="utf-8")
     cache_path = tmp_path / "prepared.npz"
 
     assert module._prepared_dataset_cache_is_stale(
         cache_path=cache_path,
         campaign_root=campaign_root,
-        source_config_path=config_path,
     )
 
     cache_path.write_text("cache\n", encoding="utf-8")
     os.utime(cache_path, ns=(3_000_000_000, 3_000_000_000))
     os.utime(node_file, ns=(2_000_000_000, 2_000_000_000))
-    os.utime(config_path, ns=(2_000_000_000, 2_000_000_000))
     assert not module._prepared_dataset_cache_is_stale(
         cache_path=cache_path,
         campaign_root=campaign_root,
-        source_config_path=config_path,
     )
 
     node_file.write_text("pxx\n[1]\n", encoding="utf-8")
@@ -103,5 +102,4 @@ def test_demo_dataset_cache_detects_raw_data_freshness(tmp_path: Path) -> None:
     assert module._prepared_dataset_cache_is_stale(
         cache_path=cache_path,
         campaign_root=campaign_root,
-        source_config_path=config_path,
     )

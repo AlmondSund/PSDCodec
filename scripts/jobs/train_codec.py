@@ -15,6 +15,16 @@ def _print_epoch_progress(progress_update: object) -> None:
     if not isinstance(progress_update, EpochProgressUpdate):
         raise TypeError("progress_update must be an EpochProgressUpdate instance.")
     metrics = progress_update.epoch_metrics
+    current_selection_score = (
+        "n/a"
+        if progress_update.current_selection_score is None
+        else f"{progress_update.current_selection_score:.6f}"
+    )
+    best_selection_score = (
+        "inf"
+        if progress_update.best_selection_score == float("inf")
+        else f"{progress_update.best_selection_score:.6f}"
+    )
     print(
         (
             f"epoch {progress_update.completed_epoch_count}/"
@@ -22,8 +32,11 @@ def _print_epoch_progress(progress_update: object) -> None:
             f"remaining_epochs={progress_update.remaining_epoch_count} | "
             f"train_loss={metrics.training_loss:.6f} | "
             f"val_loss={metrics.validation_loss:.6f} | "
+            f"current_{progress_update.selection_metric}={current_selection_score} | "
+            f"selection_candidate_accepted="
+            f"{'yes' if progress_update.selection_candidate_accepted else 'no'} | "
             f"best_{progress_update.selection_metric}="
-            f"{progress_update.best_selection_score:.6f}"
+            f"{best_selection_score}"
         ),
         flush=True,
     )

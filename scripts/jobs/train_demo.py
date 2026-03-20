@@ -9,6 +9,10 @@ import json
 import sys
 from dataclasses import asdict, replace
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from pipelines.training import TrainingExperimentConfig
 
 
 def _print_epoch_progress(progress_update: object) -> None:
@@ -18,6 +22,16 @@ def _print_epoch_progress(progress_update: object) -> None:
     if not isinstance(progress_update, EpochProgressUpdate):
         raise TypeError("progress_update must be an EpochProgressUpdate instance.")
     metrics = progress_update.epoch_metrics
+    current_selection_score = (
+        "n/a"
+        if progress_update.current_selection_score is None
+        else f"{progress_update.current_selection_score:.6f}"
+    )
+    best_selection_score = (
+        "inf"
+        if progress_update.best_selection_score == float("inf")
+        else f"{progress_update.best_selection_score:.6f}"
+    )
     print(
         (
             f"epoch {progress_update.completed_epoch_count}/"
@@ -25,8 +39,11 @@ def _print_epoch_progress(progress_update: object) -> None:
             f"remaining_epochs={progress_update.remaining_epoch_count} | "
             f"train_loss={metrics.training_loss:.6f} | "
             f"val_loss={metrics.validation_loss:.6f} | "
+            f"current_{progress_update.selection_metric}={current_selection_score} | "
+            f"selection_candidate_accepted="
+            f"{'yes' if progress_update.selection_candidate_accepted else 'no'} | "
             f"best_{progress_update.selection_metric}="
-            f"{progress_update.best_selection_score:.6f}"
+            f"{best_selection_score}"
         ),
         flush=True,
     )
@@ -62,13 +79,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def _prepare_demo_experiment_config(
-    experiment_config: object,
+    experiment_config: TrainingExperimentConfig,
     *,
     project_root: Path,
-    source_config_path: Path,
     device_override: str | None,
     allow_cpu: bool,
-) -> object:
+) -> TrainingExperimentConfig:
     """Apply demo-specific device policy before training starts.
 
     Purpose:
@@ -78,14 +94,7 @@ def _prepare_demo_experiment_config(
     """
     from codec.preprocessing import FramePreprocessor
     from data.datasets import PreparedPsdDataset
-    from pipelines.training import (
-        DatasetConfig,
-        TrainingExperimentConfig,
-        resolve_accelerator_training_device_string,
-    )
-
-    if not isinstance(experiment_config, TrainingExperimentConfig):
-        raise TypeError("experiment_config must be a TrainingExperimentConfig instance.")
+    from pipelines.training import DatasetConfig, resolve_accelerator_training_device_string
 
     adjusted_dataset_config = experiment_config.dataset
     if adjusted_dataset_config.source_format == "campaigns":
@@ -96,7 +105,6 @@ def _prepare_demo_experiment_config(
         if _prepared_dataset_cache_is_stale(
             cache_path=cache_path,
             campaign_root=adjusted_dataset_config.dataset_path,
-            source_config_path=source_config_path,
         ):
             print(f"materializing_prepared_dataset_cache: {cache_path}", flush=True)
             prepared_dataset = PreparedPsdDataset.from_campaigns(
@@ -155,14 +163,9 @@ def _prepare_demo_experiment_config(
 def _build_demo_dataset_cache_path(
     *,
     project_root: Path,
-    experiment_config: object,
+    experiment_config: TrainingExperimentConfig,
 ) -> Path:
     """Return a stable prepared-dataset cache path for one demo configuration."""
-    from pipelines.training import TrainingExperimentConfig
-
-    if not isinstance(experiment_config, TrainingExperimentConfig):
-        raise TypeError("experiment_config must be a TrainingExperimentConfig instance.")
-
     cache_payload = {
         "dataset": _json_safe_mapping(asdict(experiment_config.dataset)),
         "preprocessing": _json_safe_mapping(asdict(experiment_config.runtime.preprocessing)),
@@ -177,19 +180,18 @@ def _prepared_dataset_cache_is_stale(
     *,
     cache_path: Path,
     campaign_root: Path,
-    source_config_path: Path,
 ) -> bool:
     """Return whether the prepared demo cache must be rebuilt.
 
     Purpose:
         The demo should reuse expensive CPU preprocessing when possible, but it must
-        not silently train against stale raw campaigns or an outdated YAML config.
+        not silently train against stale raw campaigns. The cache path itself already
+        encodes the dataset and preprocessing configuration, so model-only or
+        training-only YAML edits must not force an unnecessary cache rebuild.
     """
     if not cache_path.exists():
         return True
     cache_mtime_ns = cache_path.stat().st_mtime_ns
-    if source_config_path.stat().st_mtime_ns > cache_mtime_ns:
-        return True
     latest_campaign_mtime_ns = max(
         path.stat().st_mtime_ns
         for path in campaign_root.rglob("*")
@@ -225,7 +227,6 @@ def main() -> int:
     experiment_config = _prepare_demo_experiment_config(
         experiment_config,
         project_root=project_root,
-        source_config_path=args.config,
         device_override=args.device,
         allow_cpu=args.allow_cpu,
     )

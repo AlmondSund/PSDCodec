@@ -16,6 +16,8 @@ from codec.config import (
     ScalarQuantizerConfig,
 )
 from codec.exceptions import CodecConfigurationError
+from codec.torch_preprocessing import DifferentiableInversePreprocessor
+from data.datasets import collate_prepared_psd_samples
 from models.torch_backend import TorchCodecConfig
 from objectives.distortion import IllustrativeTaskConfig
 from objectives.training import RateDistortionLossConfig
@@ -242,6 +244,57 @@ def test_training_export_writes_encoder_onnx(tmp_path: Path) -> None:
     model = onnx.load(str(summary.onnx_path))
     assert model.graph.input[0].name == "normalized_frame"
     assert model.graph.output[0].name == "pre_quantization_latents"
+
+
+def test_training_epoch_skips_validation_only_diagnostics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Training batches must not execute the exact validation diagnostics path.
+
+    Purpose:
+        Exact deployment diagnostics are CPU-side monitoring helpers. Running them on
+        every training batch stalls accelerator execution without changing the loss or
+        checkpoint-selection logic. This regression test keeps that boundary explicit.
+    """
+    experiment_config = _make_experiment_config(tmp_path, export_onnx=False)
+    trainer = TorchCodecTrainer(experiment_config)
+    training_dataset, _ = trainer.load_prepared_datasets()
+    train_loader = torch.utils.data.DataLoader(
+        training_dataset,
+        batch_size=experiment_config.training.batch_size,
+        shuffle=False,
+        collate_fn=collate_prepared_psd_samples,
+        num_workers=0,
+    )
+    inverse_preprocessor = DifferentiableInversePreprocessor(
+        experiment_config.runtime.preprocessing,
+        training_dataset.original_bin_count,
+    )
+    side_information_bits = float(
+        experiment_config.runtime.preprocessing.block_count
+        * experiment_config.runtime.preprocessing.side_information_bits_per_block
+    )
+
+    def _unexpected_validation_diagnostics(
+        *args: object,
+        **kwargs: object,
+    ) -> None:
+        raise AssertionError("Training batches must not compute validation diagnostics.")
+
+    monkeypatch.setattr(
+        trainer,
+        "_compute_validation_diagnostics",
+        _unexpected_validation_diagnostics,
+    )
+
+    trainer._run_epoch(
+        train_loader,
+        inverse_preprocessor=inverse_preprocessor,
+        side_information_bits=side_information_bits,
+        training=True,
+        dataset_frequency_grid_hz=training_dataset.frequency_grid_hz,
+    )
 
 
 def test_training_can_load_raw_campaign_directories(tmp_path: Path) -> None:
