@@ -77,6 +77,8 @@ To understand the repo in the right order:
   [`scripts/jobs/recover_codec_export.py`](/home/marti/Code/PSDCodec/scripts/jobs/recover_codec_export.py)
 - Generate the formal rate-distortion-complexity report for the demo:
   [`scripts/tools/demo_eval.py`](/home/marti/Code/PSDCodec/scripts/tools/demo_eval.py)
+- Inspect the saved evaluation graphically:
+  [`notebooks/demo_eval.ipynb`](/home/marti/Code/PSDCodec/notebooks/demo_eval.ipynb)
 - Inspect the deployment workflow:
   [`notebooks/demo_deploy.ipynb`](/home/marti/Code/PSDCodec/notebooks/demo_deploy.ipynb)
 

@@ -170,7 +170,10 @@ bundles, they should land here instead of being mixed into `docs/` or `models/`.
 Interactive orchestration and presentation.
 
 - [`notebooks/demo_deploy.ipynb`](/home/marti/Code/PSDCodec/notebooks/demo_deploy.ipynb)
-  is the single canonical notebook.
+- [`notebooks/demo_eval.ipynb`](/home/marti/Code/PSDCodec/notebooks/demo_eval.ipynb)
+  graphically analyzes the generated `reports/benchmarks/demo_eval.json` artifact.
+- [`notebooks/demo_deploy.ipynb`](/home/marti/Code/PSDCodec/notebooks/demo_deploy.ipynb)
+  walks through the deployment boundary on raw campaign frames.
 
 Rule:
 the notebook should stay thin and defer reusable logic to `src/interfaces/` and
@@ -187,8 +190,10 @@ These areas are structurally strong and aligned with the theory:
   boundary instead of burying it in the notebook.
 - `src/interfaces/evaluation.py`, `scripts/tools/demo_eval.py`,
   and `reports/benchmarks/` now provide a proper home for formal demo evaluation.
+- `notebooks/demo_eval.ipynb` stays within that boundary by consuming the saved
+  report rather than recomputing the benchmark in notebook cells.
 - `configs/experiments/demo.yaml`, `scripts/jobs/train_demo.py`, and
-  `notebooks/demo_deploy.ipynb` form a coherent demo path.
+  the two demo notebooks form a coherent demo path.
 - `tests/specs` and `tests/integration` cover the main component and workflow risks.
 
 ### Acceptable Placeholders

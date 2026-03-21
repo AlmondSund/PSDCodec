@@ -53,11 +53,11 @@ def test_demo_yaml_points_to_the_canonical_manuscript_run() -> None:
     assert config.task.bandwidth_weight == 0.0
 
 
-def test_repo_keeps_one_single_demo_notebook() -> None:
-    """The cleaned repository should expose one deployment/demo notebook only."""
+def test_repo_keeps_the_two_canonical_demo_notebooks() -> None:
+    """The repository should expose the deployment and evaluation demo notebooks."""
     notebook_names = sorted(path.name for path in Path("notebooks").glob("*.ipynb"))
 
-    assert notebook_names == ["demo_deploy.ipynb"]
+    assert notebook_names == ["demo_deploy.ipynb", "demo_eval.ipynb"]
 
 
 def test_training_config_defaults_to_auto_device_selection() -> None:
