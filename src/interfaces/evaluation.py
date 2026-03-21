@@ -671,7 +671,18 @@ def create_demo_eval_figure(
     """
     plt_module = _require_matplotlib()
 
-    figure, axes = plt_module.subplots(2, 2, figsize=(13.5, 9.0), constrained_layout=True)
+    # Use explicit subplot margins instead of figure-level constrained layout because
+    # the notebook adds both a suptitle and a footer note. Reserving those regions
+    # directly keeps the bottom caption from colliding with the lower x-axis labels.
+    figure, axes = plt_module.subplots(2, 2, figsize=(13.5, 9.4))
+    figure.subplots_adjust(
+        left=0.08,
+        right=0.98,
+        bottom=0.16,
+        top=0.90,
+        wspace=0.14,
+        hspace=0.20,
+    )
     figure.suptitle("PSDCodec Demo Evaluation Overview", x=0.02, ha="left", fontsize=15)
 
     distortion_axis = axes[0, 0]
@@ -698,30 +709,37 @@ def create_demo_eval_figure(
     distortion_axis.set_title("Distortion comparison", loc="left")
     distortion_axis.set_ylabel("PSD distortion")
     distortion_axis.grid(axis="y", alpha=0.2)
+    distortion_axis.margins(y=0.12)
     _annotate_bar_values(distortion_axis, distortion_bars, value_format="{:.4f}")
+    distortion_axis.legend(
+        distortion_bars,
+        ["Validation preproc", "Validation codec", "Benchmark preproc", "Benchmark codec"],
+        loc="upper right",
+        fontsize=8.5,
+    )
 
     rate_axis = axes[0, 1]
-    rate_axis.bar(
+    side_information_bar = rate_axis.bar(
         ["Benchmark\npayload"],
         [report.payload.side_information_bits_mean],
         color="#7FB069",
         label="Side information",
     )
-    rate_axis.bar(
+    index_payload_bar = rate_axis.bar(
         ["Benchmark\npayload"],
         [report.payload.index_bits_mean],
         bottom=[report.payload.side_information_bits_mean],
         color="#2D6A4F",
         label="Index payload",
     )
-    rate_axis.axhline(
+    held_out_rate_proxy_line = rate_axis.axhline(
         report.validation_reference.rate_proxy_bits_mean,
         color="#BC4749",
         linestyle="--",
         linewidth=1.8,
         label="Held-out rate proxy",
     )
-    rate_axis.axhline(
+    benchmark_rate_proxy_line = rate_axis.axhline(
         report.payload.rate_proxy_bits_mean,
         color="#386641",
         linestyle=":",
@@ -731,18 +749,38 @@ def create_demo_eval_figure(
     rate_axis.set_title("Rate and payload composition", loc="left")
     rate_axis.set_ylabel("Bits per frame")
     rate_axis.grid(axis="y", alpha=0.2)
+    rate_axis.margins(y=0.12)
     side_information_share_percent = (
         100.0 * report.payload.side_information_bits_mean / report.payload.operational_bits_mean
     )
+
+    # Keep the share annotation away from the top-right legend and the horizontal
+    # reference lines by placing it in axis coordinates with a small white backing.
     rate_axis.text(
-        0.0,
-        report.payload.operational_bits_mean * 1.02,
+        0.02,
+        0.96,
         f"{side_information_share_percent:.1f}% side information",
-        ha="center",
-        va="bottom",
+        transform=rate_axis.transAxes,
+        ha="left",
+        va="top",
         fontsize=9.5,
+        bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "alpha": 0.85},
     )
-    rate_axis.legend(loc="upper right")
+    rate_axis.legend(
+        [
+            held_out_rate_proxy_line,
+            benchmark_rate_proxy_line,
+            side_information_bar[0],
+            index_payload_bar[0],
+        ],
+        [
+            "Held-out rate proxy",
+            "Benchmark rate proxy",
+            "Side information",
+            "Index payload",
+        ],
+        loc="upper right",
+    )
 
     runtime_axis = axes[1, 0]
     runtime_means = np.asarray(
@@ -769,7 +807,14 @@ def create_demo_eval_figure(
     runtime_axis.set_title("Host-side runtime", loc="left")
     runtime_axis.set_ylabel("Latency [ms/frame]")
     runtime_axis.grid(axis="y", alpha=0.2)
+    runtime_axis.margins(y=0.12)
     _annotate_bar_values(runtime_axis, runtime_bars, value_format="{:.1f}")
+    runtime_axis.legend(
+        runtime_bars,
+        ["Encode latency", "Decode latency"],
+        loc="upper right",
+        fontsize=8.5,
+    )
 
     complexity_axis = axes[1, 1]
     complexity_values_millions = (
@@ -792,21 +837,20 @@ def create_demo_eval_figure(
     complexity_axis.set_title("Parameter allocation", loc="left")
     complexity_axis.set_ylabel("Parameters [millions]")
     complexity_axis.grid(axis="y", alpha=0.2)
-    complexity_axis.text(
-        0.02,
-        0.96,
-        f"Total: {report.complexity.total_parameter_count:,}",
-        transform=complexity_axis.transAxes,
-        ha="left",
-        va="top",
-        fontsize=10,
-        bbox={"boxstyle": "round,pad=0.3", "facecolor": "white", "alpha": 0.85},
+    complexity_axis.margins(y=0.12)
+    complexity_axis.legend(
+        complexity_bars,
+        ["Encoder", "Decoder", "VQ", "Entropy"],
+        title=f"Total: {report.complexity.total_parameter_count:,}",
+        loc="upper right",
+        fontsize=8.5,
+        title_fontsize=9.0,
     )
     _annotate_bar_values(complexity_axis, complexity_bars, value_format="{:.3f}")
 
     figure.text(
         0.02,
-        0.01,
+        0.045,
         (
             f"Benchmark frames: {report.dataset.total_frame_count} | "
             f"Runtime provider: {report.onnx_provider} | "
