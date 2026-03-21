@@ -19,6 +19,17 @@ from .deployment import (
     load_runtime_config_json,
     select_gallery_frames,
 )
+from .evaluation import (
+    EvaluationDatasetSummary,
+    ModelComplexitySummary,
+    PayloadCostSummary,
+    RateDistortionComplexityReport,
+    ReconstructionQualitySummary,
+    RuntimeCostSummary,
+    ValidationReferenceSummary,
+    demo_eval,
+    render_rate_distortion_complexity_markdown,
+)
 from .export import export_encoder_to_onnx
 
 __all__ = [
@@ -28,9 +39,17 @@ __all__ = [
     "CampaignFrameSample",
     "DeploymentArtifacts",
     "DeploymentReadinessAssessment",
+    "EvaluationDatasetSummary",
+    "ModelComplexitySummary",
+    "PayloadCostSummary",
     "PsdCodecService",
+    "RateDistortionComplexityReport",
+    "ReconstructionQualitySummary",
+    "RuntimeCostSummary",
+    "ValidationReferenceSummary",
     "assess_deployment_readiness",
     "create_deployment_service",
+    "demo_eval",
     "evaluate_deployment_batch",
     "evaluate_deployment_samples",
     "export_encoder_to_onnx",
@@ -39,5 +58,6 @@ __all__ = [
     "load_deployment_artifacts",
     "load_onnx_torch_deployment_model",
     "load_runtime_config_json",
+    "render_rate_distortion_complexity_markdown",
     "select_gallery_frames",
 ]

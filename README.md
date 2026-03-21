@@ -40,6 +40,7 @@ contains:
   contracts in [`src/data/`](/home/marti/Code/PSDCodec/src/data).
 - Deployment-oriented evaluation, export loading, and notebook support in
   [`src/interfaces/deployment.py`](/home/marti/Code/PSDCodec/src/interfaces/deployment.py)
+  , [`src/interfaces/evaluation.py`](/home/marti/Code/PSDCodec/src/interfaces/evaluation.py),
   and [`src/interfaces/demo_animation.py`](/home/marti/Code/PSDCodec/src/interfaces/demo_animation.py).
 - A canonical manuscript-backed demo experiment in
   [`configs/experiments/demo.yaml`](/home/marti/Code/PSDCodec/configs/experiments/demo.yaml),
@@ -74,6 +75,8 @@ To understand the repo in the right order:
   [`scripts/jobs/prepare_campaign_dataset.py`](/home/marti/Code/PSDCodec/scripts/jobs/prepare_campaign_dataset.py)
 - Recover an export bundle from a saved checkpoint:
   [`scripts/jobs/recover_codec_export.py`](/home/marti/Code/PSDCodec/scripts/jobs/recover_codec_export.py)
+- Generate the formal rate-distortion-complexity report for the demo:
+  [`scripts/tools/demo_eval.py`](/home/marti/Code/PSDCodec/scripts/tools/demo_eval.py)
 - Inspect the deployment workflow:
   [`notebooks/demo_deploy.ipynb`](/home/marti/Code/PSDCodec/notebooks/demo_deploy.ipynb)
 
@@ -88,17 +91,17 @@ The repository currently exposes these useful checks:
 .venv/bin/mypy src tests scripts
 ```
 
-At the time this README was refreshed:
+Current baseline:
 
 - `pytest` passes.
-- `ruff check` fails on notebook-cell import ordering and line-length issues in
-  [`notebooks/demo_deploy.ipynb`](/home/marti/Code/PSDCodec/notebooks/demo_deploy.ipynb).
-- `ruff format --check` reports formatting drift in several Python files and the
-  notebook.
-- `mypy` still reports a small number of test-annotation issues.
+- `ruff check .` passes.
+- `ruff format --check .` passes.
+- `mypy src tests scripts` passes.
 
-Those problems do not invalidate the codec architecture, but they do matter
-before layering on more features.
+The repository also now exposes a generated deployment-oriented benchmark at
+[`reports/benchmarks/demo_eval.md`](/home/marti/Code/PSDCodec/reports/benchmarks/demo_eval.md)
+with its machine-readable companion
+[`reports/benchmarks/demo_eval.json`](/home/marti/Code/PSDCodec/reports/benchmarks/demo_eval.json).
 
 ## Current Repository State
 

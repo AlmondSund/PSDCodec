@@ -94,7 +94,7 @@ Automated validation.
 - [`tests/specs/`](/home/marti/Code/PSDCodec/tests/specs) contains unit and
   component-level behavior tests.
 - [`tests/integration/`](/home/marti/Code/PSDCodec/tests/integration) contains
-  training, export, deployment, and end-to-end integration checks.
+  training, export, deployment, and formal evaluation integration checks.
 - [`tests/benchmarks/`](/home/marti/Code/PSDCodec/tests/benchmarks) and
   [`tests/e2e/`](/home/marti/Code/PSDCodec/tests/e2e) are currently empty.
 
@@ -108,10 +108,11 @@ Operational entrypoints.
 
 - [`scripts/jobs/`](/home/marti/Code/PSDCodec/scripts/jobs) contains the actual
   runnable training, export-recovery, and dataset-preparation CLIs.
-- [`scripts/generate/`](/home/marti/Code/PSDCodec/scripts/generate),
-  [`scripts/release/`](/home/marti/Code/PSDCodec/scripts/release), and
-  [`scripts/tools/`](/home/marti/Code/PSDCodec/scripts/tools) are currently empty
-  placeholders.
+- [`scripts/generate/`](/home/marti/Code/PSDCodec/scripts/generate) and
+  [`scripts/release/`](/home/marti/Code/PSDCodec/scripts/release) are currently
+  empty placeholders.
+- [`scripts/tools/demo_eval.py`](/home/marti/Code/PSDCodec/scripts/tools/demo_eval.py)
+  generates the formal demo rate-distortion-complexity report.
 
 Rule:
 scripts may orchestrate `src/` modules, but reusable logic should stay in `src/`.
@@ -153,11 +154,12 @@ Reserved location for generated evaluation outputs.
 The directory exists with the intended subfolders:
 
 - [`reports/figs/`](/home/marti/Code/PSDCodec/reports/figs)
-- [`reports/benchmarks/`](/home/marti/Code/PSDCodec/reports/benchmarks)
+- [`reports/benchmarks/`](/home/marti/Code/PSDCodec/reports/benchmarks), which
+  now contains `demo_eval.md` and `demo_eval.json`
 - [`reports/exports/`](/home/marti/Code/PSDCodec/reports/exports)
 - [`reports/archive/`](/home/marti/Code/PSDCodec/reports/archive)
 
-All are currently empty.
+The other report subdirectories are still empty.
 
 Rule:
 if future work generates benchmark tables, publication plots, or presentation
@@ -183,6 +185,8 @@ These areas are structurally strong and aligned with the theory:
 - `src/codec`, `src/objectives`, and `src/pipelines` reflect the manuscript well.
 - `src/interfaces/deployment.py` correctly exposes the explicit deployment
   boundary instead of burying it in the notebook.
+- `src/interfaces/evaluation.py`, `scripts/tools/demo_eval.py`,
+  and `reports/benchmarks/` now provide a proper home for formal demo evaluation.
 - `configs/experiments/demo.yaml`, `scripts/jobs/train_demo.py`, and
   `notebooks/demo_deploy.ipynb` form a coherent demo path.
 - `tests/specs` and `tests/integration` cover the main component and workflow risks.
@@ -195,8 +199,8 @@ These directories are empty but not problematic by themselves:
 - `docs/figs`, `docs/progress`
 - `data/staged`, `data/schemas`
 - `models/archive`, `models/benchmarks`
-- `reports/*`
-- `scripts/generate`, `scripts/release`, `scripts/tools`
+- `reports/archive`, `reports/exports`, `reports/figs`
+- `scripts/generate`, `scripts/release`
 - `tests/benchmarks`, `tests/e2e`
 - `src/infra`
 

@@ -1,0 +1,66 @@
+{
+  "export_dir": "/home/marti/Code/PSDCodec/models/exports/demo",
+  "checkpoint_path": "/home/marti/Code/PSDCodec/models/checkpoints/demo/best.pt",
+  "onnx_provider": "CPUExecutionProvider",
+  "validation_reference": {
+    "summary_path": "/home/marti/Code/PSDCodec/models/exports/demo/training_summary.json",
+    "best_epoch_index": 76,
+    "psd_distortion_mean": 0.01256754036785865,
+    "preprocessing_distortion_mean": 0.021417800337076187,
+    "rate_proxy_bits_mean": 4633.078152780157,
+    "task_monitor_mean": 3.6043864831828807,
+    "deployment_score": 0.8288940679018422
+  },
+  "dataset": {
+    "source_kind": "raw_campaigns",
+    "dataset_path": "/home/marti/Code/PSDCodec/data/raw/campaigns",
+    "evaluation_split": "deployment_benchmark_subset",
+    "total_frame_count": 64,
+    "evaluation_frame_count": 64,
+    "runtime_frame_count": 64,
+    "original_bin_count": 4096,
+    "reduced_bin_count": 1024,
+    "block_count": 32,
+    "excluded_campaign_labels": []
+  },
+  "quality": {
+    "psd_distortion_mean": 0.009572485995906828,
+    "psd_distortion_std": 0.002214468874256729,
+    "psd_distortion_min": 0.006672690628086996,
+    "psd_distortion_max": 0.016771459575445413,
+    "preprocessing_distortion_mean": 0.015516797483082857,
+    "codec_distortion_mean": 0.012334642170440651,
+    "task_distortion_mean": 2.7722272647755295
+  },
+  "payload": {
+    "operational_bits_mean": 4619.140625,
+    "operational_bits_std": 10.868341621856345,
+    "operational_bits_min": 4595,
+    "operational_bits_max": 4640,
+    "side_information_bits_mean": 704.0,
+    "index_bits_mean": 3915.140625,
+    "rate_proxy_bits_mean": 4625.895903422346,
+    "bits_per_original_bin_mean": 1.1277198791503906,
+    "bits_per_reduced_bin_mean": 4.5108795166015625,
+    "bits_per_latent_index_mean": 9.021759033203125
+  },
+  "runtime": {
+    "encode_latency_mean_ms": 304.974866921875,
+    "encode_latency_std_ms": 73.89977577546367,
+    "encode_latency_min_ms": 191.140708,
+    "encode_latency_max_ms": 539.595358,
+    "decode_latency_mean_ms": 176.34674679687498,
+    "decode_latency_std_ms": 35.17460476137542,
+    "decode_latency_min_ms": 79.90748,
+    "decode_latency_max_ms": 269.053931,
+    "roundtrip_exact_fraction": 1.0
+  },
+  "complexity": {
+    "total_parameter_count": 2310690,
+    "trainable_parameter_count": 2310690,
+    "encoder_parameter_count": 1153048,
+    "vector_quantizer_parameter_count": 4096,
+    "decoder_parameter_count": 1153034,
+    "entropy_model_parameter_count": 512
+  }
+}
